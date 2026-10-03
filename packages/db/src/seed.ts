@@ -113,7 +113,12 @@ try {
         .update(providerCredentials)
         .set({ revokedAt: new Date() })
         .where(
-          and(eq(providerCredentials.orgId, org.id), eq(providerCredentials.provider, provider), isNull(providerCredentials.revokedAt)),
+          and(
+            eq(providerCredentials.orgId, org.id),
+            eq(providerCredentials.provider, provider),
+            eq(providerCredentials.kind, "api"),
+            isNull(providerCredentials.revokedAt),
+          ),
         );
       await tx.insert(providerCredentials).values({
         orgId: org.id,

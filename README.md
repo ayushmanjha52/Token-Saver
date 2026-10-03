@@ -8,7 +8,7 @@ for the product constraints every change must respect.
 | Path | What |
 | --- | --- |
 | `apps/gateway` | Fastify streaming proxy for Anthropic and OpenAI behind one `ProviderAdapter` interface (`src/providers/`); budget check before forwarding; emits usage to a Redis Stream after the response closes |
-| `apps/ingest` | Stream consumer: prices each event by its timestamp, inserts it exactly once with its hourly rollup, maintains spend counters; `replay`, `redrive` and `budget` CLIs |
+| `apps/ingest` | Stream consumer: prices each event by its timestamp, inserts it exactly once with its hourly rollup, maintains spend counters, detects retries, runs lint and scores; nightly reconciliation and retention; `replay`, `redrive`, `budget`, `credential`, `reconcile`, `privacy` CLIs |
 | `apps/web` | Next.js dashboard and `/api/usage` (consent and audit rules live in `src/lib/usage.ts`) |
 | `packages/db` | Drizzle schema, migrations, seed, envelope encryption |
 | `packages/shared` | Usage event format, exact (integer) cost math, budget keys |
@@ -45,7 +45,7 @@ allows individual drill-down) and an org admin.
 ```sh
 pnpm typecheck
 pnpm test                     # unit tests
-pnpm test:integration         # stage 1-4 acceptance on embedded Postgres 16
+pnpm test:integration         # stage 1-5 acceptance on embedded Postgres 16
 ```
 
 The integration suites use a real Postgres and the real gateway, worker and
@@ -96,6 +96,20 @@ things they cannot cover need real infrastructure:
   acceptance (0.2). A component with no measured input, such as acceptance until
   something reports it, has its weight redistributed and is shown as such. Every
   component is stored in `efficiency_scores`.
+- **Reconciliation.** Store a provider admin key, scoped to the workspace or project the
+  gateway key belongs to so other traffic is not counted:
+  `TOKENGRID_CREDENTIAL=sk-ant-admin01-... pnpm --filter @tokengrid/ingest credential --email <admin> --provider anthropic --kind admin --scope <workspace id>`.
+  After 01:00 UTC the worker compares the previous day's provider bill with metered cost
+  per model and stores every comparison (`reconciliations`, charted at `/admin`). Drift
+  over 2% (and over $0.001) raises one alert per model and day, posted to
+  `ALERT_WEBHOOK_URL` if set. Re-run any day with
+  `pnpm --filter @tokengrid/ingest reconcile --day YYYY-MM-DD`.
+- **Retention** is per org (`organizations.retention_days`, default 395). Per-person
+  detail older than that is deleted daily; the access audit is kept at least a year.
+- **Export and delete-on-request.** People download everything held about them from
+  their dashboard (NDJSON) and can delete their usage history there. Deletion moves
+  their hourly totals to an unnamed "Former member" line so org totals, budgets and
+  reconciliation still add up. Operators: `pnpm --filter @tokengrid/ingest privacy export|delete|retention`.
 - **Privacy:** managers see team totals with unnamed per-person lines (hidden entirely
   below three other people), ordered by a per-period pseudonym rather than spend.
   Opening one person requires their consent, writes an audit row first, and is listed

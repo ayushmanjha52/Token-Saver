@@ -350,3 +350,31 @@ table.table {
   border-bottom: none;
   padding-bottom: 0;
 }
+
+/* A link that does what a button does (a download, a page change) and looks like one. */
+.linkButton {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+
+.linkButton:hover {
+  border-color: var(--ink);
+}
+
+.danger:not(:disabled) {
+  border-color: var(--oxblood);
+  color: var(--oxblood);
+}
+
+.danger:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+}

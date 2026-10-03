@@ -109,7 +109,8 @@ export class VirtualKeyResolver {
       .from(virtualKeys)
       .leftJoin(
         providerCredentials,
-        and(eq(providerCredentials.orgId, virtualKeys.orgId), isNull(providerCredentials.revokedAt)),
+        // Admin (reporting) keys are never loaded on the request path.
+        and(eq(providerCredentials.orgId, virtualKeys.orgId), eq(providerCredentials.kind, "api"), isNull(providerCredentials.revokedAt)),
       )
       .where(and(eq(virtualKeys.keyHash, hash), isNull(virtualKeys.revokedAt)));
     const first = rows[0];

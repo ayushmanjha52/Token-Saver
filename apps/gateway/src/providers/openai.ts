@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { fingerprint, mentionsFormat, numbersDigest, sha256Hex, simhash64, type PricingTier, type PromptFeatures } from "@tokengrid/shared";
+import { canonicalModelId, fingerprint, mentionsFormat, numbersDigest, sha256Hex, simhash64, type PricingTier, type PromptFeatures } from "@tokengrid/shared";
 import { SseParser } from "../sse.js";
 import type { GatewayErrorKind, MeteredCall, ProviderAdapter, ProviderRoute, UsageMeter } from "./types.js";
 import { headerString, isRecord, JsonCollector, num } from "./util.js";
@@ -12,10 +12,8 @@ import { headerString, isRecord, JsonCollector, num } from "./util.js";
  */
 export const OPENAI_LONG_CONTEXT_TOKENS = 272_000;
 
-/** gpt-5.6-terra-2026-07-14 -> gpt-5.6-terra: responses name the snapshot, prices are per model. */
-export function canonicalOpenAIModel(model: string): string {
-  return model.replace(/-\d{4}-\d{2}-\d{2}$/, "");
-}
+/** Snapshot ids (gpt-6-sol-2026-08-01) are priced as their model. */
+export const canonicalOpenAIModel = canonicalModelId;
 
 /**
  * Chat Completions usage. Unlike Anthropic's, `prompt_tokens` is a total

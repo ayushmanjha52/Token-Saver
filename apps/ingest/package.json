@@ -10,7 +10,10 @@
     "start": "tsx --env-file-if-exists=../../.env src/worker.ts",
     "replay": "tsx --env-file-if-exists=../../.env src/replay.ts",
     "redrive": "tsx --env-file-if-exists=../../.env src/redrive.ts",
-    "budget": "tsx --env-file-if-exists=../../.env src/budget-cli.ts"
+    "budget": "tsx --env-file-if-exists=../../.env src/budget-cli.ts",
+    "reconcile": "tsx --env-file-if-exists=../../.env src/reconcile-cli.ts",
+    "credential": "tsx --env-file-if-exists=../../.env src/credential-cli.ts",
+    "privacy": "tsx --env-file-if-exists=../../.env src/privacy-cli.ts"
   },
   "dependencies": {
     "@tokengrid/db": "workspace:*",

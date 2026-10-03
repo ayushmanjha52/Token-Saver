@@ -1,11 +1,13 @@
 import { hostname } from "node:os";
 import { Redis } from "ioredis";
-import { createDb, ensureUsagePartitions } from "@tokengrid/db";
+import { applyRetention, createDb, ensureUsagePartitions } from "@tokengrid/db";
 import { USAGE_CONSUMER_GROUP, USAGE_STREAM } from "@tokengrid/shared";
 import { PriceCache } from "./prices.js";
 import { processEntry } from "./process.js";
 import { SpendCounters } from "./spend.js";
 import { pruneFeatures, storeScore } from "./efficiency.js";
+import { costSources } from "./providers/cost-sources.js";
+import { reconcileDay, webhookSink } from "./reconcile.js";
 import { entriesFromRead, minStreamId, toEntries, type StreamEntry } from "./stream.js";
 
 /** An entry unacked this long belongs to a consumer that crashed or hit a transient failure. */
@@ -134,6 +136,24 @@ async function main(): Promise<void> {
     for (const [userId, orgId] of batch) await storeScore(db, userId, orgId, new Date());
   });
   every(24 * 60 * 60_000, "prompt feature retention", () => pruneFeatures(db));
+  every(24 * 60 * 60_000, "org retention", async () => {
+    log.info({ reports: await applyRetention(db) }, "retention applied");
+  });
+
+  // Reconcile yesterday once per process per day. Re-runs are harmless (rows
+  // are upserted, alerts deduplicated), so several workers need no lock.
+  // Provider cost data settles within minutes; waiting until 01:00 UTC
+  // leaves an hour of margin for late buckets.
+  let reconciledDay = "";
+  const sink = webhookSink(process.env.ALERT_WEBHOOK_URL, log);
+  every(60 * 60_000, "reconciliation", async () => {
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 86_400_000);
+    const key = yesterday.toISOString().slice(0, 10);
+    if (now.getUTCHours() < 1 || reconciledDay === key) return;
+    await reconcileDay(db, costSources(), yesterday, sink, log);
+    reconciledDay = key;
+  });
 
   let lastReclaim = 0;
   while (!stopping) {

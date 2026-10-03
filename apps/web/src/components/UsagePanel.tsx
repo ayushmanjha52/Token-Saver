@@ -124,6 +124,11 @@ export function UsagePanel() {
               {data.viewer.displayName}
               {data.viewer.orgRole === "admin" ? <span className="label"> · org admin</span> : null}
             </span>
+            {data.viewer.orgRole === "admin" ? (
+              <a className={s.linkButton} href="/admin">
+                Reconciliation
+              </a>
+            ) : null}
             <button type="button" onClick={() => void signOut()}>
               Sign out
             </button>
@@ -382,12 +387,54 @@ export function UsagePanel() {
                     </tbody>
                   </table>
                 )}
+                <MyData onDeleted={() => void load(view, period)} />
               </div>
             </section>
           ) : null}
         </div>
       ) : null}
     </main>
+  );
+}
+
+const DELETE_PHRASE = "delete my usage data";
+
+/** Export and delete-on-request. Deletion is typed, not clicked, because it cannot be undone. */
+function MyData({ onDeleted }: { onDeleted: () => void }) {
+  const [typed, setTyped] = useState("");
+  const [state, setState] = useState<"idle" | "deleting" | "done" | "failed">("idle");
+
+  async function remove() {
+    setState("deleting");
+    const res = await fetch("/api/me/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: typed }) });
+    setState(res.ok ? "done" : "failed");
+    if (res.ok) onDeleted();
+  }
+
+  return (
+    <>
+      <h3 className="label" style={{ margin: "20px 0 6px" }}>
+        Your copy, or none at all
+      </h3>
+      <p style={{ marginTop: 0 }}>
+        Download everything TokenGrid holds about you, or delete your usage history. Deletion keeps your organization&apos;s
+        totals correct by moving them to an unnamed &ldquo;Former member&rdquo; line; nothing left points back to you.
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <a className={s.linkButton} href="/api/me/export" download>
+          Download my data · NDJSON
+        </a>
+        <label className="sr-only" htmlFor="delete-confirm">
+          Type “{DELETE_PHRASE}” to confirm
+        </label>
+        <input id="delete-confirm" placeholder={`type: ${DELETE_PHRASE}`} value={typed} onChange={(e) => setTyped(e.target.value)} style={{ minWidth: 240 }} />
+        <button type="button" className={s.danger} disabled={typed !== DELETE_PHRASE || state === "deleting"} onClick={() => void remove()}>
+          Delete my usage data
+        </button>
+      </div>
+      {state === "done" ? <p className={s.note}>Deleted. Your organization&apos;s totals are unchanged and no longer name you.</p> : null}
+      {state === "failed" ? <p className={`${s.note} ${s.over}`}>Deletion failed; nothing was removed. Try again.</p> : null}
+    </>
   );
 }
 

@@ -7,9 +7,10 @@
     "typecheck": "tsc -p tsconfig.json",
     "stage1": "tsx src/stage1.ts",
     "stage2": "pnpm --filter @tokengrid/web build && tsx src/stage2.ts",
-    "test:integration": "pnpm run stage1 && pnpm run stage2 && pnpm run stage3 && pnpm run stage4",
+    "test:integration": "pnpm run stage1 && pnpm run stage2 && pnpm run stage3 && pnpm run stage4 && pnpm run stage5",
     "stage3": "tsx src/stage3.ts",
-    "stage4": "tsx src/stage4.ts"
+    "stage4": "tsx src/stage4.ts",
+    "stage5": "tsx src/stage5.ts"
   },
   "devDependencies": {
     "@tokengrid/db": "workspace:*",

@@ -23,6 +23,12 @@ const timestamptz = (name: string) => timestamp(name, { withTimezone: true, mode
 export const organizations = pgTable("organizations", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
+  /**
+   * How long per-person usage detail is kept. 395 days covers a full
+   * year-on-year comparison; anything longer is monitoring data kept
+   * without a purpose.
+   */
+  retentionDays: integer("retention_days").notNull().default(395),
   createdAt: timestamptz("created_at").notNull().defaultNow(),
 });
 
@@ -127,13 +133,25 @@ export const providerCredentials = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     orgId: uuid("org_id").notNull().references(() => organizations.id),
     provider: text("provider").notNull(),
+    /**
+     * 'api' keys are what the gateway forwards with; 'admin' keys only read
+     * the provider's usage and cost reports for reconciliation, and the
+     * gateway never loads them.
+     */
+    kind: text("kind").notNull().default("api"),
+    /**
+     * Admin keys only: the provider workspace or project the gateway's API
+     * key belongs to. Reconciliation compares against that scope alone, so
+     * traffic that never passed through TokenGrid does not read as drift.
+     */
+    reconcileScope: text("reconcile_scope"),
     ciphertext: text("ciphertext").notNull(),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     revokedAt: timestamptz("revoked_at"),
   },
   (t) => [
     uniqueIndex("provider_credentials_live_uq")
-      .on(t.orgId, t.provider)
+      .on(t.orgId, t.provider, t.kind)
       .where(sql`${t.revokedAt} is null`),
   ],
 );
@@ -426,4 +444,44 @@ export const efficiencyScores = pgTable(
     computedAt: timestamptz("computed_at").notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.asOfDay] })],
+);
+
+/**
+ * One row per org, provider, UTC day and model: what the provider billed
+ * against what TokenGrid metered. Kept as rows so drift is a chart over
+ * time, not a log line.
+ */
+export const reconciliations = pgTable(
+  "reconciliations",
+  {
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    provider: text("provider").notNull(),
+    day: date("day", { mode: "string" }).notNull(),
+    model: text("model").notNull(),
+    providerUsd: numeric("provider_usd", { precision: 16, scale: 6 }).notNull(),
+    meteredUsd: numeric("metered_usd", { precision: 16, scale: 6 }).notNull(),
+    /** (metered - provider) / provider. Null when the provider billed nothing. */
+    driftRatio: numeric("drift_ratio", { precision: 10, scale: 6 }),
+    /** 'ok' | 'drift' */
+    status: text("status").notNull(),
+    checkedAt: timestamptz("checked_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.provider, t.day, t.model] })],
+);
+
+/** Operational alerts for org admins. Delivered to ALERT_WEBHOOK_URL when set; always stored. */
+export const alerts = pgTable(
+  "alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    kind: text("kind").notNull(),
+    /** Deduplicates re-runs: the same drift on the same day raises one alert. */
+    dedupeKey: text("dedupe_key").notNull(),
+    message: text("message").notNull(),
+    detail: jsonb("detail").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    acknowledgedAt: timestamptz("acknowledged_at"),
+  },
+  (t) => [uniqueIndex("alerts_dedupe_uq").on(t.orgId, t.dedupeKey), index("alerts_org_time_idx").on(t.orgId, t.createdAt)],
 );

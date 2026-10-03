@@ -200,3 +200,12 @@ function parsePrompt(raw: unknown): PromptFeatures | null {
     sessionKey: str(raw, "sessionKey"),
   };
 }
+
+/**
+ * Strips a trailing -YYYY-MM-DD snapshot date. Providers report the exact
+ * snapshot that served a call (gpt-6-sol-2026-08-01) but price per model, so
+ * events, prices and cost reports all key on the undated id.
+ */
+export function canonicalModelId(model: string): string {
+  return model.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+}

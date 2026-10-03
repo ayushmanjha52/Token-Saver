@@ -12,3 +12,5 @@ export {
 export { hashVirtualKey, issueVirtualKey, isVirtualKeyShape, type IssuedVirtualKey } from "./keys.js";
 export { ensureUsagePartitions } from "./partitions.js";
 export { CATALOG, type CatalogPrice } from "./catalog.js";
+
+export { applyRetention, deleteUserData, exportUserData, UnknownUserError, AUDIT_MIN_RETENTION_DAYS, type RetentionReport } from "./privacy.js";
