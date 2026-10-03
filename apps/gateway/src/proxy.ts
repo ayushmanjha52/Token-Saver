@@ -7,7 +7,7 @@ import type { UsageEventV1 } from "@tokengrid/shared";
 import { AuthBackendUnavailableError, type ResolvedKey, type VirtualKeyResolver } from "./auth.js";
 import { BUDGET_WARNING_HEADER, budgetExceededMessage, budgetWarningValue, type BudgetGuard } from "./budget.js";
 import type { UsageEmitter } from "./emit.js";
-import { AnthropicUsageAccumulator } from "./providers/anthropic.js";
+import { AnthropicUsageAccumulator, extractAnthropicPromptFeatures } from "./providers/anthropic.js";
 
 export interface ProxyDeps {
   resolver: VirtualKeyResolver;
@@ -43,6 +43,9 @@ function presentedKey(headers: IncomingHttpHeaders): string | null {
   if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7);
   return null;
 }
+
+/** Optional client-supplied conversation id; retries are matched within one session. Never forwarded upstream. */
+const SESSION_HEADER = "x-tokengrid-session";
 
 function headerString(h: string | string[] | undefined): string | null {
   if (typeof h === "string") return h;
@@ -217,6 +220,12 @@ async function forward(deps: ProxyDeps, req: FastifyRequest, reply: FastifyReply
       stopReason: call.stopReason,
       usage: call.usage,
       unpricedUnits: call.unpricedUnits,
+      // Computed after the response is delivered, so parsing a multi-megabyte
+      // body never adds latency. Without a session header, the key is the session.
+      prompt: extractAnthropicPromptFeatures(
+        req.body as Buffer,
+        `${resolved.virtualKeyId}:${(headerString(req.headers[SESSION_HEADER]) ?? "").slice(0, 128)}`,
+      ),
     };
     deps.emitter.emit(event);
   } catch (err) {

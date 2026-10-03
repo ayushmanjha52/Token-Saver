@@ -1,9 +1,12 @@
 import type { PriceRates, PricingTier, Provider } from "@tokengrid/shared";
 
+export type ModelTier = "frontier" | "balanced" | "fast";
+
 export interface CatalogPrice extends PriceRates {
   provider: Provider;
   providerModelId: string;
-  tier: PricingTier;
+  tier: ModelTier;
+  pricingTier: PricingTier;
   effectiveFrom: string;
   source: string;
 }
@@ -28,6 +31,7 @@ const SOURCE = "Anthropic pricing via claude-api reference (cached 2026-09-25); 
 
 function anthropic(
   providerModelId: string,
+  tier: ModelTier,
   input: string,
   output: string,
   cacheRead: string,
@@ -37,7 +41,8 @@ function anthropic(
   return {
     provider: "anthropic",
     providerModelId,
-    tier: "standard",
+    tier,
+    pricingTier: "standard",
     effectiveFrom: CHECKED,
     source: SOURCE,
     inputPerMtok: input,
@@ -49,15 +54,15 @@ function anthropic(
 }
 
 export const CATALOG: readonly CatalogPrice[] = [
-  anthropic("claude-fable-5-1", "10", "50", "0.25", "12.50", "20"),
-  anthropic("claude-fable-5", "10", "50", "1.00", "12.50", "20"),
-  anthropic("claude-opus-5-5", "4", "20", "0.20", "5", "8"),
-  anthropic("claude-opus-5", "5", "25", "0.50", "6.25", "10"),
-  anthropic("claude-opus-4-8", "5", "25", "0.50", "6.25", "10"),
-  anthropic("claude-opus-4-7", "5", "25", "0.50", "6.25", "10"),
-  anthropic("claude-opus-4-6", "5", "25", "0.50", "6.25", "10"),
-  anthropic("claude-sonnet-5-5", "2", "10", "0.20", "2.50", "4"),
-  anthropic("claude-sonnet-5", "2", "10", "0.20", "2.50", "4"),
-  anthropic("claude-sonnet-4-6", "3", "15", "0.30", "3.75", "6"),
-  anthropic("claude-haiku-4-5", "1", "5", "0.10", "1.25", "2"),
+  anthropic("claude-fable-5-1", "frontier", "10", "50", "0.25", "12.50", "20"),
+  anthropic("claude-fable-5", "frontier", "10", "50", "1.00", "12.50", "20"),
+  anthropic("claude-opus-5-5", "frontier", "4", "20", "0.20", "5", "8"),
+  anthropic("claude-opus-5", "frontier", "5", "25", "0.50", "6.25", "10"),
+  anthropic("claude-opus-4-8", "frontier", "5", "25", "0.50", "6.25", "10"),
+  anthropic("claude-opus-4-7", "frontier", "5", "25", "0.50", "6.25", "10"),
+  anthropic("claude-opus-4-6", "frontier", "5", "25", "0.50", "6.25", "10"),
+  anthropic("claude-sonnet-5-5", "balanced", "2", "10", "0.20", "2.50", "4"),
+  anthropic("claude-sonnet-5", "balanced", "2", "10", "0.20", "2.50", "4"),
+  anthropic("claude-sonnet-4-6", "balanced", "3", "15", "0.30", "3.75", "6"),
+  anthropic("claude-haiku-4-5", "fast", "1", "5", "0.10", "1.25", "2"),
 ];

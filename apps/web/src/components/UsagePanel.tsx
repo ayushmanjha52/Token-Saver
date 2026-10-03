@@ -5,6 +5,7 @@ import { count, niceCeil, pct, tokens, usd, usdNumber } from "@/lib/format";
 import type { Figures, MeterRow, PeriodKey, SpendSplit, UsageError, UsageResponse } from "@/lib/usage-types";
 import { PERIODS } from "@/lib/usage-types";
 import { DailySpend } from "./DailySpend";
+import { CoachingPanel, ScorePanel, TeamCoachingPanel } from "./Coaching";
 import { Meter, type MeterSplit } from "./Meter";
 import s from "./usage.module.css";
 
@@ -32,7 +33,7 @@ function FigureTip({ title, f }: { title: string; f: Figures }) {
   return (
     <>
       <div style={{ fontWeight: 600 }}>{title}</div>
-      <div>Spend {usd(f.costUsd)}</div>
+      <div>Spend {usd(f.costUsd)}{usdNumber(f.wastedUsd) > 0 ? ` · wasted ${usd(f.wastedUsd)}` : ""}</div>
       <div>{count(f.requests, "request")}</div>
       <div>Input {tokens(f.inputTokens)} · Output {tokens(f.outputTokens)}</div>
       <div>Cache reads {pct(f.cacheReadTokens, prompt)} of prompt</div>
@@ -209,6 +210,11 @@ export function UsagePanel() {
                   <div className={s.hero}>
                     <span className={`display ${s.heroValue}`}>{usd(data.totals.costUsd)}</span>
                     <span className={s.heroUnit}>USD spent</span>
+                    {data.split.wastedUsd !== null && usdNumber(data.split.wastedUsd) > 0 ? (
+                      <span className="label">
+                        {usd(data.split.wastedUsd)} wasted on discarded responses · {pct(usdNumber(data.split.wastedUsd), total)}
+                      </span>
+                    ) : null}
                   </div>
                   <Meter
                     split={toMeter(data.split)}
@@ -227,27 +233,29 @@ export function UsagePanel() {
                     <Stat label="Cache reads" value={tokens(data.totals.cacheReadTokens)} />
                     <Stat label="Cache writes" value={tokens(data.totals.cacheWriteTokens)} />
                     <Stat label="Prompt from cache" value={pct(data.totals.cacheReadTokens, promptTokens)} />
+                    <Stat label="Re-sent" value={count(data.totals.retriedRequests, "request")} />
                   </div>
                   <div className={s.legend}>
                     {data.split.productiveUsd !== null ? (
                       <span className={`${s.key} label`}>
-                        <span className={`${s.swatch} ${s.swProductive}`} /> Productive
+                        <span className={`${s.swatch} ${s.swProductive}`} /> Kept {usd(data.split.productiveUsd)}
                       </span>
                     ) : null}
                     {data.split.wastedUsd !== null ? (
                       <span className={`${s.key} label`}>
-                        <span className={`${s.swatch} ${s.swWasted}`} /> Wasted
+                        <span className={`${s.swatch} ${s.swWasted}`} /> Wasted {usd(data.split.wastedUsd)}
                       </span>
                     ) : null}
-                    <span className={`${s.key} label`}>
-                      <span className={`${s.swatch} ${s.swUnclassified}`} /> Unclassified
-                    </span>
+                    {usdNumber(data.split.unclassifiedUsd) > 0 ? (
+                      <span className={`${s.key} label`}>
+                        <span className={`${s.swatch} ${s.swUnclassified}`} /> Unclassified {usd(data.split.unclassifiedUsd)}
+                      </span>
+                    ) : null}
                   </div>
-                  {data.split.wastedUsd === null ? (
-                    <p className={s.note}>
-                      Waste is not measured yet, so spend is shown unclassified rather than assumed productive.
-                    </p>
-                  ) : null}
+                  <p className={s.note}>
+                    Wasted is spend on responses thrown away because the same prompt was sent again within 15 minutes, counted in
+                    the hour the discarded request ran. Kept means not re-sent; nothing yet reports whether a kept answer was used.
+                  </p>
                   {data.totals.incompleteRequests > 0 ? (
                     <p className={s.note}>
                       {count(data.totals.incompleteRequests, "request")} ended before the provider reported final usage; their
@@ -289,6 +297,9 @@ export function UsagePanel() {
               </div>
             </section>
           ) : null}
+
+          {data.score ? <ScorePanel score={data.score} /> : null}
+          {data.scope.kind !== "team" ? <CoachingPanel findings={data.findings} /> : <TeamCoachingPanel totals={data.teamFindings} />}
 
           {data.scope.kind === "team" ? (
             <TeamLines

@@ -9,6 +9,7 @@ import {
 import { ingestEvent, type IngestOutcome, type IngestResult } from "./ingest.js";
 import type { PriceCache } from "./prices.js";
 import type { SpendCounters } from "./spend.js";
+import { lintRequest } from "./efficiency.js";
 
 export type EntryOutcome = IngestOutcome | "dead-lettered" | "retry";
 
@@ -77,6 +78,7 @@ export async function processEntry(
   deliveries: number,
   log: { warn: (obj: object, msg: string) => void },
   counters?: SpendCounters,
+  touchedUsers?: Map<string, string>,
 ): Promise<EntryOutcome> {
   let event: UsageEventV1;
   let result: IngestResult;
@@ -97,6 +99,12 @@ export async function processEntry(
       log.warn({ err: dlqErr, entryId }, "dead-letter write failed; will redeliver");
       return "retry";
     }
+  }
+  if (result.outcome === "inserted") {
+    // Lint findings and scores are derived data, rebuilt on the next matching
+    // request or score pass, so their failures never cause a redelivery.
+    await lintRequest(db, prices, event).catch((err: unknown) => log.warn({ err, entryId }, "lint failed"));
+    touchedUsers?.set(event.userId, event.orgId);
   }
   if (counters && result.outcome === "inserted") {
     // Best effort: the event is already durable, and a missed increment is

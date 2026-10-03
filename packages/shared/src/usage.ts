@@ -1,4 +1,5 @@
 import { InvalidUsageEventError } from "./errors.js";
+import type { PromptFeatures } from "./prompt.js";
 
 /**
  * Provider-neutral token counts. Every field is disjoint from the others:
@@ -54,6 +55,12 @@ export interface UsageEventV1 {
    * the token cost alone would understate the bill.
    */
   unpricedUnits: Record<string, number>;
+  /**
+   * Hashes and sizes of the prompt, for retry detection and lint. Null when
+   * the request body could not be read; absent on events from gateways
+   * older than the efficiency layer, which parse as null.
+   */
+  prompt: PromptFeatures | null;
 }
 
 export function emptyUsage(): NormalizedUsage {
@@ -124,6 +131,7 @@ export function parseUsageEvent(raw: string): UsageEventV1 {
   if (!isRecord(unpricedRaw)) throw new InvalidUsageEventError("unpricedUnits must be an object");
   const unpricedUnits: Record<string, number> = {};
   for (const k of Object.keys(unpricedRaw)) unpricedUnits[k] = count(unpricedRaw, k);
+  const prompt = parsePrompt(parsed.prompt);
 
   return {
     v: 1,
@@ -148,5 +156,41 @@ export function parseUsageEvent(raw: string): UsageEventV1 {
       cacheWrite1hTokens: count(u, "cacheWrite1hTokens"),
     },
     unpricedUnits,
+    prompt,
+  };
+}
+
+function bool(o: Record<string, unknown>, k: string): boolean {
+  const v = o[k];
+  if (typeof v !== "boolean") throw new InvalidUsageEventError(`prompt.${k} must be boolean`);
+  return v;
+}
+
+function hex(o: Record<string, unknown>, k: string, len: number): string {
+  const v = o[k];
+  if (typeof v !== "string" || !new RegExp(`^[0-9a-f]{${len}}$`).test(v)) throw new InvalidUsageEventError(`prompt.${k} must be ${len} hex chars`);
+  return v;
+}
+
+function parsePrompt(raw: unknown): PromptFeatures | null {
+  if (raw === undefined || raw === null) return null;
+  if (!isRecord(raw)) throw new InvalidUsageEventError("prompt must be an object or null");
+  const prefixHash = raw.prefixHash;
+  if (prefixHash !== null && (typeof prefixHash !== "string" || !/^[0-9a-f]{32}$/.test(prefixHash))) {
+    throw new InvalidUsageEventError("prompt.prefixHash must be 32 hex chars or null");
+  }
+  return {
+    fingerprint: hex(raw, "fingerprint", 32),
+    lastUserSimhash: hex(raw, "lastUserSimhash", 16),
+    lastUserChars: count(raw, "lastUserChars"),
+    lastUserNumbers: hex(raw, "lastUserNumbers", 32),
+    messageCount: count(raw, "messageCount"),
+    prefixHash,
+    prefixChars: count(raw, "prefixChars"),
+    totalChars: count(raw, "totalChars"),
+    hasSystem: bool(raw, "hasSystem"),
+    hasFormatSpec: bool(raw, "hasFormatSpec"),
+    usesCacheControl: bool(raw, "usesCacheControl"),
+    sessionKey: str(raw, "sessionKey"),
   };
 }

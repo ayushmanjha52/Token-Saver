@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AnthropicUsageAccumulator } from "./anthropic.js";
+import { AnthropicUsageAccumulator, extractAnthropicPromptFeatures } from "./anthropic.js";
 
 function sse(events: [string, unknown][]): string {
   return events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
@@ -134,4 +134,50 @@ test("server tool use and fast mode are surfaced, not dropped", () => {
   const r = acc.result("req_f");
   assert.equal(r?.pricingTier, "fast");
   assert.deepEqual(r?.unpricedUnits, { web_search_requests: 3 });
+});
+
+
+const doc = "Substation log. ".repeat(500);
+const req = (question: string, extra: Record<string, unknown> = {}) =>
+  Buffer.from(
+    JSON.stringify({
+      model: "claude-opus-5-5",
+      max_tokens: 100,
+      system: "You are terse.",
+      messages: [{ role: "user", content: [{ type: "text", text: doc }, { type: "text", text: question }] }],
+      ...extra,
+    }),
+  );
+
+test("prompt features: document is prefix, the question is the final turn, no text leaks", () => {
+  const f = extractAnthropicPromptFeatures(req("Which feeder tripped at 14:02?"), "k:");
+  assert.ok(f);
+  assert.equal(f.lastUserChars, "Which feeder tripped at 14:02?".length);
+  assert.ok(f.prefixChars >= doc.length);
+  assert.equal(f.hasSystem, true);
+  assert.equal(f.usesCacheControl, false);
+  assert.ok(!JSON.stringify(f).includes("Substation") && !JSON.stringify(f).includes("feeder"));
+});
+
+test("same prefix, different question: prefix hash equal, final-turn simhash differs", () => {
+  const a = extractAnthropicPromptFeatures(req("Which feeder tripped at 14:02?"), "k:");
+  const b = extractAnthropicPromptFeatures(req("Summarise the overnight load profile for the north bus."), "k:");
+  assert.ok(a && b);
+  assert.equal(a.prefixHash, b.prefixHash);
+  assert.notEqual(a.lastUserSimhash, b.lastUserSimhash);
+});
+
+test("format spec and cache control are detected", () => {
+  const f = extractAnthropicPromptFeatures(req("Answer in JSON."), "k:");
+  assert.equal(f?.hasFormatSpec, true);
+  const cached = extractAnthropicPromptFeatures(
+    req("q", { system: [{ type: "text", text: "You are terse.", cache_control: { type: "ephemeral" } }] }),
+    "k:",
+  );
+  assert.equal(cached?.usesCacheControl, true);
+});
+
+test("non-Messages bodies yield null", () => {
+  assert.equal(extractAnthropicPromptFeatures(Buffer.from("not json"), "k:"), null);
+  assert.equal(extractAnthropicPromptFeatures(Buffer.from("{}"), "k:"), null);
 });

@@ -1,4 +1,13 @@
-import type { NormalizedUsage, PricingTier } from "@tokengrid/shared";
+import {
+  fingerprint,
+  mentionsFormat,
+  numbersDigest,
+  sha256Hex,
+  simhash64,
+  type NormalizedUsage,
+  type PricingTier,
+  type PromptFeatures,
+} from "@tokengrid/shared";
 import { SseParser } from "../sse.js";
 
 /** What the gateway learned about one upstream call, in provider-neutral terms. */
@@ -183,4 +192,87 @@ export class AnthropicUsageAccumulator {
       unpricedUnits,
     };
   }
+}
+
+function blockText(block: unknown): string {
+  if (typeof block === "string") return block;
+  if (!isRecord(block)) return "";
+  switch (block.type) {
+    case "text":
+      return typeof block.text === "string" ? block.text : "";
+    case "document":
+      return isRecord(block.source) && block.source.type === "text" && typeof block.source.data === "string" ? block.source.data : "";
+    case "tool_result":
+      return contentText(block.content);
+    case "tool_use":
+      return JSON.stringify(block.input ?? null);
+    default:
+      // Images, PDFs and thinking blocks carry no text we can size reliably.
+      return "";
+  }
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  return Array.isArray(content) ? content.map(blockText).join("\n") : "";
+}
+
+/**
+ * Reduces an Anthropic Messages request to provider-neutral prompt features.
+ *
+ * The "final user turn" is the last content block of the last user message:
+ * a document pasted in an earlier block is part of the reusable prefix, and
+ * only the question after it is what a person retypes on a retry. The
+ * prefix hash covers the parsed JSON of everything before that block, which
+ * is what prompt caching would match on.
+ *
+ * Returns null for anything that is not a Messages request; the caller
+ * meters the call regardless.
+ */
+export function extractAnthropicPromptFeatures(body: Buffer, sessionKey: string): PromptFeatures | null {
+  let req: unknown;
+  try {
+    req = JSON.parse(body.toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!isRecord(req) || !Array.isArray(req.messages) || req.messages.length === 0) return null;
+  const messages = req.messages as unknown[];
+
+  const systemText = contentText(req.system);
+  const tools = Array.isArray(req.tools) ? req.tools : [];
+  const toolsJson = tools.length > 0 ? JSON.stringify(tools) : "";
+
+  const last = messages[messages.length - 1];
+  const lastIsUser = isRecord(last) && last.role === "user";
+  const lastBlocks = lastIsUser ? (Array.isArray(last.content) ? (last.content as unknown[]) : [last.content]) : [];
+  const finalBlock = lastBlocks[lastBlocks.length - 1];
+  const lastUserText = lastIsUser ? blockText(finalBlock) : "";
+
+  const earlierMessages = lastIsUser ? messages.slice(0, -1) : messages;
+  const earlierText = earlierMessages.map((m) => (isRecord(m) ? contentText(m.content) : "")).join("\n");
+  const lastPrefixBlocksText = lastBlocks.slice(0, -1).map(blockText).join("\n");
+  const prefixParts = [systemText, toolsJson, earlierText, lastPrefixBlocksText].filter((p) => p.length > 0);
+  const prefixChars = prefixParts.reduce((a, p) => a + p.length, 0);
+
+  const fullText = [systemText, earlierText, lastPrefixBlocksText, lastUserText].filter(Boolean).join("\n");
+  const outputConfig = isRecord(req.output_config) ? req.output_config : null;
+
+  return {
+    fingerprint: fingerprint(fullText),
+    lastUserSimhash: simhash64(lastUserText),
+    lastUserChars: lastUserText.length,
+    lastUserNumbers: numbersDigest(lastUserText),
+    messageCount: messages.length,
+    prefixHash:
+      prefixChars > 0
+        ? sha256Hex(JSON.stringify([req.system ?? null, tools, earlierMessages, lastBlocks.slice(0, -1)]))
+        : null,
+    prefixChars,
+    totalChars: prefixChars + lastUserText.length,
+    hasSystem: systemText.trim().length > 0,
+    hasFormatSpec: Boolean(outputConfig?.format) || tools.length > 0 || mentionsFormat(`${systemText}\n${lastUserText}`),
+    usesCacheControl: body.includes('"cache_control"'),
+    sessionKey,
+  };
 }

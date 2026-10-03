@@ -49,7 +49,10 @@ async function seedCatalog(tx: Tx): Promise<void> {
   // is in the past; the guard trigger requires an explicit opt-in for that.
   await tx.execute(sql`select set_config('tokengrid.allow_backdated_price', 'on', true)`);
   for (const p of CATALOG) {
-    await tx.insert(models).values({ provider: p.provider, providerModelId: p.providerModelId }).onConflictDoNothing();
+    await tx
+      .insert(models)
+      .values({ provider: p.provider, providerModelId: p.providerModelId, tier: p.tier })
+      .onConflictDoUpdate({ target: [models.provider, models.providerModelId], set: { tier: p.tier } });
     const [model] = await tx
       .select({ id: models.id })
       .from(models)
@@ -59,7 +62,7 @@ async function seedCatalog(tx: Tx): Promise<void> {
       .insert(modelPrices)
       .values({
         modelId: model.id,
-        tier: p.tier,
+        tier: p.pricingTier,
         effectiveFrom: new Date(p.effectiveFrom),
         inputPerMtok: p.inputPerMtok,
         outputPerMtok: p.outputPerMtok,

@@ -20,6 +20,7 @@ const valid: UsageEventV1 = {
   stopReason: "end_turn",
   usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWrite5mTokens: 4, cacheWrite1hTokens: 5 },
   unpricedUnits: {},
+  prompt: null,
 };
 
 test("round-trips a valid event", () => {
@@ -41,4 +42,18 @@ test("rejects unknown providers and tiers", () => {
 test("rejects garbage", () => {
   assert.throws(() => parseUsageEvent("not json"), InvalidUsageEventError);
   assert.throws(() => parseUsageEvent("[]"), InvalidUsageEventError);
+});
+
+test("events from older gateways without prompt features parse with prompt = null", () => {
+  const { prompt: _omit, ...old } = valid;
+  assert.equal(parseUsageEvent(JSON.stringify(old)).prompt, null);
+});
+
+test("prompt features are validated", () => {
+  const prompt = {
+    fingerprint: "a".repeat(32), lastUserSimhash: "0".repeat(16), lastUserChars: 10, lastUserNumbers: "b".repeat(32), messageCount: 1,
+    prefixHash: null, prefixChars: 0, totalChars: 10, hasSystem: false, hasFormatSpec: false, usesCacheControl: false, sessionKey: "k",
+  };
+  assert.deepEqual(parseUsageEvent(JSON.stringify({ ...valid, prompt })).prompt, prompt);
+  assert.throws(() => parseUsageEvent(JSON.stringify({ ...valid, prompt: { ...prompt, fingerprint: "not-hex" } })), InvalidUsageEventError);
 });

@@ -42,7 +42,7 @@ allows individual drill-down) and an org admin.
 ```sh
 pnpm typecheck
 pnpm test                     # unit tests
-pnpm test:integration         # stage 1 + stage 2 acceptance on embedded Postgres 16
+pnpm test:integration         # stage 1-3 acceptance on embedded Postgres 16
 ```
 
 The integration suites use a real Postgres and the real gateway, worker and
@@ -70,6 +70,21 @@ things they cannot cover need real infrastructure:
   rates for fast mode are not published), so fast-mode events wait in the DLQ.
 - **Web search and other server-tool charges** are not priced yet; such events go to the
   DLQ rather than being stored at token cost only.
+- **Efficiency layer.** The gateway reduces each request to hashes and sizes after the
+  response is delivered (no prompt text is stored or leaves the gateway). Clients can
+  send `x-tokengrid-session: <conversation id>` to scope retry matching; without it a
+  key is one session. A retry is a structurally identical final turn (same fingerprint,
+  shape, numbers, simhash within 3 bits) within 15 minutes; the earlier response counts
+  as wasted, charged to its own hour.
+- **Lint findings** come from the trailing 7 days, scaled to a month. Every finding
+  shows the spend it affects; a saving is shown only where prices make it computable
+  (caching, model tier). Rules: uncached repeated prefix, short tasks on a frontier
+  model, long answers with no format requested, large context for short answers,
+  repeated workflow without a system prompt.
+- **Efficiency score** = weighted retries (0.35), model fit (0.25), cache use (0.2),
+  acceptance (0.2). A component with no measured input, such as acceptance until
+  something reports it, has its weight redistributed and is shown as such. Every
+  component is stored in `efficiency_scores`.
 - **Privacy:** managers see team totals with unnamed per-person lines (hidden entirely
   below three other people), ordered by a per-period pseudonym rather than spend.
   Opening one person requires their consent, writes an audit row first, and is listed

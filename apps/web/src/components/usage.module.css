@@ -332,3 +332,21 @@ table.table {
     grid-column: 1 / -1;
   }
 }
+
+.finding {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.finding:first-child {
+  padding-top: 0;
+}
+
+.finding:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}

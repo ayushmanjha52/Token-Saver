@@ -5,6 +5,7 @@ import { USAGE_CONSUMER_GROUP, USAGE_STREAM } from "@tokengrid/shared";
 import { PriceCache } from "./prices.js";
 import { processEntry } from "./process.js";
 import { SpendCounters } from "./spend.js";
+import { pruneFeatures, storeScore } from "./efficiency.js";
 import { entriesFromRead, minStreamId, toEntries, type StreamEntry } from "./stream.js";
 
 /** An entry unacked this long belongs to a consumer that crashed or hit a transient failure. */
@@ -35,6 +36,8 @@ const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const { db, sql } = createDb(undefined, { max: 4 });
 const prices = new PriceCache(db);
 const counters = new SpendCounters(redis);
+/** userId -> orgId of people with new events since the last score pass. */
+const touchedUsers = new Map<string, string>();
 const consumer = `${hostname()}-${process.pid}`;
 let stopping = false;
 
@@ -50,7 +53,7 @@ async function ensureGroup(): Promise<void> {
 
 async function handle(entries: StreamEntry[], deliveries: (id: string) => number): Promise<void> {
   for (const e of entries) {
-    const outcome = await processEntry(db, prices, e.id, e.payload, deliveries(e.id), log, counters);
+    const outcome = await processEntry(db, prices, e.id, e.payload, deliveries(e.id), log, counters, touchedUsers);
     // XACK only after the outcome is durable in Postgres; acking first would
     // lose the event if the process died before the insert committed.
     if (outcome !== "retry") await redis.xack(USAGE_STREAM, USAGE_CONSUMER_GROUP, e.id);
@@ -125,6 +128,12 @@ async function main(): Promise<void> {
   };
   await syncSpend();
   every(30_000, "budget + spend sync", syncSpend);
+  every(60_000, "efficiency scores", async () => {
+    const batch = [...touchedUsers];
+    touchedUsers.clear();
+    for (const [userId, orgId] of batch) await storeScore(db, userId, orgId, new Date());
+  });
+  every(24 * 60 * 60_000, "prompt feature retention", () => pruneFeatures(db));
 
   let lastReclaim = 0;
   while (!stopping) {

@@ -18,6 +18,8 @@ export class PriceCache {
   private versions = new Map<string, PriceVersion[]>();
   private loadedAt = 0;
   private lastMissReload = 0;
+  /** provider -> model -> capability tier (frontier | balanced | fast). */
+  private modelTiers = new Map<string, Map<string, string>>();
 
   constructor(private readonly db: Database) {}
 
@@ -32,6 +34,7 @@ export class PriceCache {
         id: modelPrices.id,
         provider: models.provider,
         model: models.providerModelId,
+        modelTier: models.tier,
         tier: modelPrices.tier,
         effectiveFrom: modelPrices.effectiveFrom,
         effectiveTo: modelPrices.effectiveTo,
@@ -44,13 +47,18 @@ export class PriceCache {
       .from(modelPrices)
       .innerJoin(models, eq(models.id, modelPrices.modelId));
     const next = new Map<string, PriceVersion[]>();
+    const tiers = new Map<string, Map<string, string>>();
     for (const r of rows) {
+      const byModel = tiers.get(r.provider) ?? new Map<string, string>();
+      byModel.set(r.model, r.modelTier);
+      tiers.set(r.provider, byModel);
       const k = PriceCache.key(r.provider, r.model, r.tier);
       const list = next.get(k) ?? [];
       list.push(r);
       next.set(k, list);
     }
     this.versions = next;
+    this.modelTiers = tiers;
     this.loadedAt = Date.now();
   }
 
@@ -66,5 +74,25 @@ export class PriceCache {
     }
     if (!found) throw new PriceNotFoundError(provider, model, tier, at);
     return found;
+  }
+
+  modelTier(provider: string, model: string): string | undefined {
+    return this.modelTiers.get(provider)?.get(model);
+  }
+
+  /**
+   * The cheapest model in a tier with a standard price in force at `at`,
+   * ranked by input + output rate. Used to price the model-fit suggestion.
+   */
+  cheapestInTier(provider: string, tier: string, at: Date): { model: string; price: PriceVersion } | null {
+    let best: { model: string; price: PriceVersion; rank: number } | null = null;
+    for (const [model, t] of this.modelTiers.get(provider) ?? []) {
+      if (t !== tier) continue;
+      const price = selectPriceVersion(this.versions.get(PriceCache.key(provider, model, "standard")) ?? [], at);
+      if (!price) continue;
+      const rank = Number(price.inputPerMtok) + Number(price.outputPerMtok);
+      if (!best || rank < best.rank) best = { model, price, rank };
+    }
+    return best ? { model: best.model, price: best.price } : null;
   }
 }

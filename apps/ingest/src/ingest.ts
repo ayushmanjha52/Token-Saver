@@ -1,6 +1,7 @@
 import { sql, type AnyColumn } from "drizzle-orm";
 import { schema, type Database } from "@tokengrid/db";
 import { computeCost, UnpricedUsageError, type UsageEventV1 } from "@tokengrid/shared";
+import { recordPromptAndDetectRetry } from "./efficiency.js";
 import type { PriceCache } from "./prices.js";
 
 export type IngestOutcome = "inserted" | "duplicate";
@@ -93,6 +94,7 @@ export async function ingestEvent(db: Database, prices: PriceCache, event: Usage
           costUsd: add(r.costUsd),
         },
       });
+    await recordPromptAndDetectRetry(tx, event, cost.costUsd);
     return "inserted";
   });
 

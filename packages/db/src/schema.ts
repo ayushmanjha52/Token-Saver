@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -165,6 +166,12 @@ export const models = pgTable(
     provider: text("provider").notNull(),
     /** Exactly the string the provider returns in its response `model` field. */
     providerModelId: text("provider_model_id").notNull(),
+    /**
+     * 'frontier' | 'balanced' | 'fast'. The model-fit lint compares a
+     * request against the cheapest current model one tier down, so the tier
+     * is data, not a pattern match on model names.
+     */
+    tier: text("tier").notNull().default("balanced"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("models_provider_model_uq").on(t.provider, t.providerModelId)],
@@ -275,6 +282,10 @@ export const usageRollupHourly = pgTable(
     cacheReadTokens: bigint("cache_read_tokens", { mode: "bigint" }).notNull(),
     cacheWriteTokens: bigint("cache_write_tokens", { mode: "bigint" }).notNull(),
     costUsd: numeric("cost_usd", { precision: 24, scale: 12 }).notNull(),
+    /** Requests in this bucket that were later re-sent, i.e. whose response was discarded. */
+    retriedRequests: integer("retried_requests").notNull().default(0),
+    /** Cost of those discarded responses, charged to the hour the discarded request ran, not the hour of the retry. */
+    wastedCostUsd: numeric("wasted_cost_usd", { precision: 24, scale: 12 }).notNull().default("0"),
   },
   (t) => [
     primaryKey({ columns: [t.bucketStart, t.orgId, t.userId, t.virtualKeyId, t.provider, t.model] }),
@@ -298,4 +309,121 @@ export const usageDlq = pgTable(
     resolvedAt: timestamptz("resolved_at"),
   },
   (t) => [uniqueIndex("usage_dlq_entry_uq").on(t.streamEntryId)],
+);
+
+/**
+ * Per-request prompt features from the gateway: hashes and sizes, never
+ * text. Retry detection looks back 15 minutes and lint looks back 7 days, so
+ * rows are pruned after PROMPT_FEATURE_RETENTION_DAYS.
+ */
+export const promptFeatures = pgTable(
+  "prompt_features",
+  {
+    provider: text("provider").notNull(),
+    providerRequestId: text("provider_request_id").notNull(),
+    occurredAt: timestamptz("occurred_at").notNull(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    virtualKeyId: uuid("virtual_key_id").notNull().references(() => virtualKeys.id),
+    sessionKey: text("session_key").notNull(),
+    model: text("model").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    lastUserSimhash: text("last_user_simhash").notNull(),
+    lastUserChars: integer("last_user_chars").notNull(),
+    lastUserNumbers: text("last_user_numbers").notNull(),
+    messageCount: integer("message_count").notNull(),
+    prefixHash: text("prefix_hash"),
+    /** Prompt tokens before the final user turn: measured prompt tokens scaled by the prefix share of characters. */
+    prefixTokensEst: integer("prefix_tokens_est").notNull(),
+    hasSystem: boolean("has_system").notNull(),
+    hasFormatSpec: boolean("has_format_spec").notNull(),
+    usesCacheControl: boolean("uses_cache_control").notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    cacheReadTokens: integer("cache_read_tokens").notNull(),
+    cacheWriteTokens: integer("cache_write_tokens").notNull(),
+    costUsd: numeric("cost_usd", { precision: 24, scale: 12 }).notNull(),
+    /** Lint rules that matched this request. */
+    flags: text("flags").array().notNull().default(sql`'{}'::text[]`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.provider, t.providerRequestId] }),
+    index("prompt_features_session_idx").on(t.sessionKey, t.occurredAt),
+    index("prompt_features_user_fp_idx").on(t.userId, t.fingerprint, t.occurredAt),
+    index("prompt_features_user_prefix_idx").on(t.userId, t.prefixHash, t.occurredAt),
+    index("prompt_features_user_time_idx").on(t.userId, t.occurredAt),
+  ],
+);
+
+/** A request whose response was thrown away because the same prompt was re-sent. One row per discarded request. */
+export const retries = pgTable(
+  "retries",
+  {
+    provider: text("provider").notNull(),
+    discardedRequestId: text("discarded_request_id").notNull(),
+    retryRequestId: text("retry_request_id").notNull(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    discardedAt: timestamptz("discarded_at").notNull(),
+    wastedCostUsd: numeric("wasted_cost_usd", { precision: 24, scale: 12 }).notNull(),
+    wastedTokens: bigint("wasted_tokens", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.provider, t.discardedRequestId] }),
+    index("retries_user_time_idx").on(t.userId, t.discardedAt),
+  ],
+);
+
+/**
+ * Current prompt-lint findings, one row per person, rule and prompt group.
+ * Figures are monthly, extrapolated from the trailing 7 days. Every finding
+ * states the spend it affects; savings are filled only where prices make
+ * them computable.
+ */
+export const lintFindings = pgTable(
+  "lint_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    rule: text("rule").notNull(),
+    /** The prompt fingerprint or prefix hash the finding is about. */
+    groupKey: text("group_key").notNull(),
+    model: text("model").notNull(),
+    requests7d: integer("requests_7d").notNull(),
+    monthlyAtStakeUsd: numeric("monthly_at_stake_usd", { precision: 14, scale: 4 }).notNull(),
+    monthlySavingsUsd: numeric("monthly_savings_usd", { precision: 14, scale: 4 }),
+    detail: jsonb("detail").notNull(),
+    firstSeen: timestamptz("first_seen").notNull(),
+    lastSeen: timestamptz("last_seen").notNull(),
+  },
+  (t) => [uniqueIndex("lint_findings_uq").on(t.userId, t.rule, t.groupKey)],
+);
+
+/**
+ * Efficiency score per person per day over a trailing window. Every
+ * component and the weight it actually carried are stored, so a score is
+ * always shown with what produced it. A null component had no measured input
+ * and its weight went to the others.
+ */
+export const efficiencyScores = pgTable(
+  "efficiency_scores",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    asOfDay: date("as_of_day", { mode: "string" }).notNull(),
+    windowDays: integer("window_days").notNull(),
+    requests: integer("requests").notNull(),
+    retryRate: numeric("retry_rate", { precision: 6, scale: 5 }),
+    modelFit: numeric("model_fit", { precision: 6, scale: 5 }),
+    cacheHitRate: numeric("cache_hit_rate", { precision: 6, scale: 5 }),
+    acceptanceRate: numeric("acceptance_rate", { precision: 6, scale: 5 }),
+    weightRetry: numeric("weight_retry", { precision: 4, scale: 3 }).notNull(),
+    weightModelFit: numeric("weight_model_fit", { precision: 4, scale: 3 }).notNull(),
+    weightCache: numeric("weight_cache", { precision: 4, scale: 3 }).notNull(),
+    weightAcceptance: numeric("weight_acceptance", { precision: 4, scale: 3 }).notNull(),
+    score: numeric("score", { precision: 5, scale: 2 }),
+    computedAt: timestamptz("computed_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.asOfDay] })],
 );

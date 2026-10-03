@@ -22,7 +22,7 @@ if (!key) {
 }
 const model = process.env.ACCEPTANCE_MODEL ?? "claude-opus-5-5";
 const gatewayUrl = process.env.GATEWAY_URL ?? `http://localhost:${process.env.GATEWAY_PORT ?? "8787"}`;
-const price = CATALOG.find((p) => p.providerModelId === model && p.tier === "standard");
+const price = CATALOG.find((p) => p.providerModelId === model && p.pricingTier === "standard");
 if (!price) {
   console.error(`No catalog price for ${model}; pick a model from packages/db/src/catalog.ts.`);
   process.exit(1);

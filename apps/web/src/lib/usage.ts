@@ -1,9 +1,21 @@
 import { createHmac } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { schema, type Database } from "@tokengrid/db";
-import { periodStart } from "@tokengrid/shared";
+import { COST_SCALE, formatDecimal, parseDecimal, periodStart } from "@tokengrid/shared";
 import type { Session } from "./session-token";
-import type { DailyPoint, Figures, MeterRow, ModelLine, PeriodKey, SpendSplit, TeamRef, UsageResponse } from "./usage-types";
+import type {
+  DailyPoint,
+  Figures,
+  Finding,
+  MeterRow,
+  ModelLine,
+  PeriodKey,
+  RuleTotal,
+  ScoreView,
+  SpendSplit,
+  TeamRef,
+  UsageResponse,
+} from "./usage-types";
 import { PERIODS } from "./usage-types";
 
 export class UsageAccessError extends Error {
@@ -75,10 +87,15 @@ const ZERO: Figures = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
   costUsd: "0",
+  retriedRequests: 0,
+  wastedUsd: "0",
 };
 
+/** Exact: kept = total − wasted, in pico-dollars, so the two segments always sum to the figure shown. */
 function splitOf(f: Figures): SpendSplit {
-  return { productiveUsd: null, wastedUsd: null, unclassifiedUsd: f.costUsd };
+  const total = parseDecimal(f.costUsd, COST_SCALE);
+  const wasted = parseDecimal(f.wastedUsd, COST_SCALE);
+  return { productiveUsd: formatDecimal(total - wasted, COST_SCALE), wastedUsd: f.wastedUsd, unclassifiedUsd: "0" };
 }
 
 const r = schema.usageRollupHourly;
@@ -90,7 +107,71 @@ const figureColumns = {
   cacheReadTokens: sql<number>`coalesce(sum(${r.cacheReadTokens}), 0)::float8`,
   cacheWriteTokens: sql<number>`coalesce(sum(${r.cacheWriteTokens}), 0)::float8`,
   costUsd: sql<string>`coalesce(sum(${r.costUsd}), 0)::text`,
+  retriedRequests: sql<number>`coalesce(sum(${r.retriedRequests}), 0)::int`,
+  wastedUsd: sql<string>`coalesce(sum(${r.wastedCostUsd}), 0)::text`,
 };
+
+/** Findings stop showing once nothing has matched them for a week; they describe current habits, not history. */
+const FINDING_FRESH_MS = 7 * DAY_MS;
+
+async function loadFindings(db: Database, userId: string, now: Date): Promise<Finding[]> {
+  const t = schema.lintFindings;
+  const rows = await db
+    .select()
+    .from(t)
+    .where(and(eq(t.userId, userId), gte(t.lastSeen, new Date(now.getTime() - FINDING_FRESH_MS))))
+    .orderBy(desc(sql`coalesce(${t.monthlySavingsUsd}, 0)`), desc(t.monthlyAtStakeUsd));
+  return rows.map((f) => ({
+    rule: f.rule as Finding["rule"],
+    model: f.model,
+    requests7d: f.requests7d,
+    monthlyAtStakeUsd: f.monthlyAtStakeUsd,
+    monthlySavingsUsd: f.monthlySavingsUsd,
+    detail: f.detail as Record<string, string | number>,
+    lastSeen: f.lastSeen.toISOString(),
+  }));
+}
+
+async function loadTeamFindings(db: Database, orgId: string, userIds: string[], now: Date): Promise<RuleTotal[]> {
+  if (userIds.length === 0) return [];
+  const t = schema.lintFindings;
+  const rows = await db
+    .select({
+      rule: t.rule,
+      people: sql<number>`count(distinct ${t.userId})::int`,
+      atStake: sql<string>`sum(${t.monthlyAtStakeUsd})::text`,
+      savings: sql<string | null>`sum(${t.monthlySavingsUsd})::text`,
+    })
+    .from(t)
+    .where(and(eq(t.orgId, orgId), inArray(t.userId, userIds), gte(t.lastSeen, new Date(now.getTime() - FINDING_FRESH_MS))))
+    .groupBy(t.rule)
+    .orderBy(desc(sql`sum(${t.monthlyAtStakeUsd})`));
+  return rows.map((x) => ({
+    rule: x.rule as RuleTotal["rule"],
+    people: x.people >= MIN_ANONYMOUS_ROWS ? x.people : null,
+    monthlyAtStakeUsd: x.atStake,
+    monthlySavingsUsd: x.savings,
+  }));
+}
+
+async function loadScore(db: Database, userId: string): Promise<ScoreView | null> {
+  const t = schema.efficiencyScores;
+  const [s] = await db.select().from(t).where(eq(t.userId, userId)).orderBy(desc(t.asOfDay)).limit(1);
+  if (!s) return null;
+  return {
+    asOfDay: s.asOfDay,
+    windowDays: s.windowDays,
+    requests: s.requests,
+    score: s.score,
+    components: [
+      // Retry is stored as a rate; the component is its complement, so higher is better everywhere.
+      { key: "retry", value: s.retryRate === null ? null : (1 - Number(s.retryRate)).toFixed(5), weight: s.weightRetry },
+      { key: "modelFit", value: s.modelFit, weight: s.weightModelFit },
+      { key: "cache", value: s.cacheHitRate, weight: s.weightCache },
+      { key: "acceptance", value: s.acceptanceRate, weight: s.weightAcceptance },
+    ],
+  };
+}
 
 interface Viewer {
   id: string;
@@ -246,6 +327,9 @@ export async function getUsage(
       daily: agg.daily,
       models: agg.models,
       budget,
+      findings: await loadFindings(db, v.id, now),
+      teamFindings: [],
+      score: await loadScore(db, v.id),
     };
   }
 
@@ -288,6 +372,9 @@ export async function getUsage(
       daily: agg.daily,
       models: agg.models,
       budget: null,
+      findings: await loadFindings(db, subject.userId, now),
+      teamFindings: [],
+      score: await loadScore(db, subject.userId),
     };
   }
 
@@ -322,6 +409,9 @@ export async function getUsage(
     daily: agg.daily,
     models: agg.models,
     budget: null,
+    findings: [],
+    teamFindings: await loadTeamFindings(db, v.orgId, ids, now),
+    score: null,
   };
 }
 
