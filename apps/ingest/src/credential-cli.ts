@@ -45,7 +45,7 @@ try {
       // Admin keys get their own encryption context, so an admin ciphertext
       // copied into an API-key row fails authentication instead of being
       // forwarded upstream.
-      ciphertext: encryptSecret(secret, { orgId: user.orgId, provider: kind === "admin" ? `${provider}#admin` : provider }),
+      ciphertext: await encryptSecret(secret, { orgId: user.orgId, provider: kind === "admin" ? `${provider}#admin` : provider }),
     });
   });
   console.log(`stored ${provider} ${kind} credential for org ${user.orgId}${values.scope ? ` (scope ${values.scope})` : ""}`);

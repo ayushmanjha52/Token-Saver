@@ -1,0 +1,61 @@
+# Full stack on one host (or as a rehearsal of the managed deployment).
+#   cp deploy/prod.env.example deploy/prod.env   # fill it
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/prod.env up -d --build
+# The `migrate` service runs to completion before the gateway and worker start.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tokengrid
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: tokengrid
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tokengrid"]
+      interval: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    # AOF: an unacknowledged usage event lives only in the stream.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redisdata:/data
+  migrate:
+    build: { context: .., target: ingest }
+    command: ["node", "packages/db/dist/migrate.js"]
+    environment: &app_env
+      NODE_ENV: production
+      DATABASE_URL: postgres://tokengrid:${POSTGRES_PASSWORD}@postgres:5432/tokengrid
+      REDIS_URL: redis://redis:6379
+      TOKENGRID_KMS_KEY_ID: ${TOKENGRID_KMS_KEY_ID:?set TOKENGRID_KMS_KEY_ID}
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      TOKENGRID_SESSION_SECRET: ${TOKENGRID_SESSION_SECRET:?set TOKENGRID_SESSION_SECRET}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+  gateway:
+    build: { context: .., target: gateway }
+    environment: *app_env
+    ports: ["8787:8787"]
+    stop_grace_period: 300s
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_started }
+  ingest:
+    build: { context: .., target: ingest }
+    environment: *app_env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_started }
+  web:
+    build: { context: .., target: web }
+    environment: *app_env
+    ports: ["3000:3000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+volumes:
+  pgdata:
+  redisdata:

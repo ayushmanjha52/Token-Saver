@@ -14,8 +14,16 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
           </h1>
         </div>
         <div className={s.panelBody}>
+          {searchParams.error === "link" ? (
+            <p className="mono" role="alert" style={{ margin: "0 0 12px", color: "var(--oxblood)" }}>
+              That sign-in link is invalid, expired or already used. Ask an admin for a new one.
+            </p>
+          ) : null}
           {production ? (
-            <p style={{ margin: 0 }}>Email-only sign-in is disabled in production. An identity provider has not been configured.</p>
+            <p style={{ margin: 0 }}>
+              Sign in with the one-time link an org admin sends you. Admins issue them with{" "}
+              <span className="mono">admin login-link --email you@company.com</span>; links expire after 15 minutes and work once.
+            </p>
           ) : (
             <form method="post" action="/api/session" style={{ display: "grid", gap: 12 }}>
               <label className="label" htmlFor="email">

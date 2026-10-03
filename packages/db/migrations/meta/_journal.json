@@ -50,6 +50,13 @@
       "when": 1791043894204,
       "tag": "0006_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791045703911,
+      "tag": "0007_login_links",
+      "breakpoints": true
     }
   ]
 }

@@ -89,7 +89,7 @@ export async function reconcileDay(
     const provider = cred.provider as Provider;
     let billed: Map<string, number>;
     try {
-      const adminKey = decryptSecret(cred.ciphertext, { orgId: cred.orgId, provider: `${provider}#admin` });
+      const adminKey = await decryptSecret(cred.ciphertext, { orgId: cred.orgId, provider: `${provider}#admin` });
       billed = await source.dailyCostByModel(adminKey, cred.scope, start);
     } catch (err) {
       log.warn({ err, orgId: cred.orgId, provider }, "cost report unavailable; day left unreconciled");

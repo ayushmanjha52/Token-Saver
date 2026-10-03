@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import { decryptSecret, hashVirtualKey, isVirtualKeyShape, schema, type Database } from "@tokengrid/db";
-import { PROVIDERS, type Provider } from "@tokengrid/shared";
+import { PROVIDERS, virtualKeyCacheKey, type Provider } from "@tokengrid/shared";
 
 function isProvider(p: string): p is Provider {
   return (PROVIDERS as readonly string[]).includes(p);
@@ -45,9 +45,7 @@ const NEGATIVE_TTL_MS = 30_000;
 const REDIS_TTL_S = 300;
 const MEMORY_MAX = 10_000;
 
-export function redisKeyFor(hash: string): string {
-  return `tg:vk:${hash}`;
-}
+export const redisKeyFor = virtualKeyCacheKey;
 
 export class VirtualKeyResolver {
   private readonly memory = new Map<string, MemoryEntry>();
@@ -66,7 +64,7 @@ export class VirtualKeyResolver {
     if (hit && hit.expiresAt > now) return hit.value;
 
     const record = await this.lookup(hash);
-    const value = record ? this.decrypt(record) : null;
+    const value = record ? await this.decrypt(record) : null;
     this.remember(hash, value, now + (value ? MEMORY_TTL_MS : NEGATIVE_TTL_MS));
     return value;
   }
@@ -122,10 +120,10 @@ export class VirtualKeyResolver {
     return { virtualKeyId: first.virtualKeyId, orgId: first.orgId, userId: first.userId, credentials };
   }
 
-  private decrypt(record: CachedRecord): ResolvedKey {
+  private async decrypt(record: CachedRecord): Promise<ResolvedKey> {
     const upstreamKeys: Partial<Record<Provider, string>> = {};
     for (const [provider, ciphertext] of Object.entries(record.credentials) as [Provider, string][]) {
-      upstreamKeys[provider] = decryptSecret(ciphertext, { orgId: record.orgId, provider });
+      upstreamKeys[provider] = await decryptSecret(ciphertext, { orgId: record.orgId, provider });
     }
     return { virtualKeyId: record.virtualKeyId, orgId: record.orgId, userId: record.userId, upstreamKeys };
   }

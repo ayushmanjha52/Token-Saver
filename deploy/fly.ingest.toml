@@ -1,0 +1,21 @@
+# fly deploy --config deploy/fly.ingest.toml
+# Worker only (no public service). Migrations run as the release command, so
+# a deploy never starts new code against an old schema.
+app = "tokengrid-ingest"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = 30
+
+[build]
+  dockerfile = "../Dockerfile"
+  build-target = "ingest"
+
+[env]
+  NODE_ENV = "production"
+
+[deploy]
+  release_command = "node packages/db/dist/migrate.js"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

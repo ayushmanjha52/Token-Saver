@@ -485,3 +485,16 @@ export const alerts = pgTable(
   },
   (t) => [uniqueIndex("alerts_dedupe_uq").on(t.orgId, t.dedupeKey), index("alerts_org_time_idx").on(t.orgId, t.createdAt)],
 );
+
+/**
+ * One-time sign-in links issued by an operator (admin CLI) until an
+ * identity provider is wired in. The link itself is HMAC-signed; this row
+ * is what makes it single-use.
+ */
+export const loginLinks = pgTable("login_links", {
+  nonce: text("nonce").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  expiresAt: timestamptz("expires_at").notNull(),
+  usedAt: timestamptz("used_at"),
+  createdAt: timestamptz("created_at").notNull().defaultNow(),
+});

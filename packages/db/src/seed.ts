@@ -1,14 +1,13 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { InvariantViolationError, type Provider } from "@tokengrid/shared";
-import { createDb, type Database } from "./client.js";
+import { createDb } from "./client.js";
 import { CATALOG } from "./catalog.js";
+import { syncCatalog } from "./catalog-sync.js";
 import { encryptSecret } from "./crypto.js";
 import { issueVirtualKey } from "./keys.js";
 import {
   drilldownConsents,
   memberships,
-  modelPrices,
-  models,
   organizations,
   providerCredentials,
   teams,
@@ -26,8 +25,6 @@ export class MissingSeedCredentialError extends Error {
   }
 }
 
-type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
 const DEMO_ORG = "Demo Org";
 const DEMO_TEAM = "Platform";
 
@@ -44,37 +41,6 @@ const PEOPLE = [
   { email: "c@tokengrid.local", displayName: "Demo Member C", orgRole: "member", teamRole: "member", consents: false },
 ] as const;
 
-async function seedCatalog(tx: Tx): Promise<void> {
-  // The catalog's effective_from is the date the prices were checked, which
-  // is in the past; the guard trigger requires an explicit opt-in for that.
-  await tx.execute(sql`select set_config('tokengrid.allow_backdated_price', 'on', true)`);
-  for (const p of CATALOG) {
-    await tx
-      .insert(models)
-      .values({ provider: p.provider, providerModelId: p.providerModelId, tier: p.tier })
-      .onConflictDoUpdate({ target: [models.provider, models.providerModelId], set: { tier: p.tier } });
-    const [model] = await tx
-      .select({ id: models.id })
-      .from(models)
-      .where(and(eq(models.provider, p.provider), eq(models.providerModelId, p.providerModelId)));
-    if (!model) throw new InvariantViolationError(`model ${p.providerModelId} missing after upsert`);
-    await tx
-      .insert(modelPrices)
-      .values({
-        modelId: model.id,
-        tier: p.pricingTier,
-        effectiveFrom: new Date(p.effectiveFrom),
-        inputPerMtok: p.inputPerMtok,
-        outputPerMtok: p.outputPerMtok,
-        cacheReadPerMtok: p.cacheReadPerMtok,
-        cacheWrite5mPerMtok: p.cacheWrite5mPerMtok,
-        cacheWrite1hPerMtok: p.cacheWrite1hPerMtok,
-        source: p.source,
-      })
-      .onConflictDoNothing();
-  }
-}
-
 async function findOrCreate<T>(find: () => Promise<T | undefined>, create: () => Promise<T | undefined>, what: string): Promise<T> {
   const row = (await find()) ?? (await create());
   if (!row) throw new InvariantViolationError(`${what} insert returned nothing`);
@@ -86,8 +52,8 @@ if (!upstreamKey) throw new MissingSeedCredentialError();
 
 const { db, sql: client } = createDb(undefined, { max: 1 });
 try {
+  await syncCatalog(db);
   await db.transaction(async (tx) => {
-    await seedCatalog(tx);
 
     const org = await findOrCreate(
       async () => (await tx.select().from(organizations).where(eq(organizations.name, DEMO_ORG)))[0],
@@ -123,7 +89,7 @@ try {
       await tx.insert(providerCredentials).values({
         orgId: org.id,
         provider,
-        ciphertext: encryptSecret(secret, { orgId: org.id, provider }),
+        ciphertext: await encryptSecret(secret, { orgId: org.id, provider }),
       });
     }
 

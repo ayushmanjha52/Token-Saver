@@ -16,7 +16,7 @@ for the product constraints every change must respect.
 
 ## Run locally
 
-Requires Node 20.12+, pnpm 9, Postgres 16 and Redis 7 (`docker compose up -d` provides both).
+Requires Node 20.12+, pnpm 9, Postgres 16 and Redis 7 (`docker compose up -d` provides both). For production see [DEPLOY.md](DEPLOY.md).
 
 ```sh
 pnpm install
@@ -45,18 +45,28 @@ allows individual drill-down) and an org admin.
 ```sh
 pnpm typecheck
 pnpm test                     # unit tests
-pnpm test:integration         # stage 1-5 acceptance on embedded Postgres 16
+pnpm build:services && pnpm build:web
+REDIS_SERVER_BIN=redis-server pnpm test:integration   # stage 1-6 acceptance
 ```
 
-The integration suites use a real Postgres and the real gateway, worker and
-dashboard code, with a fake Anthropic upstream and an in-memory Redis. Two
-things they cannot cover need real infrastructure:
+The integration suites run on a throwaway Postgres 16 (embedded, no Docker)
+with the real gateway, worker and dashboard code against fake provider APIs.
+Stages 1–5 use an in-memory Redis. Stage 6 rehearses a cold deploy from the
+production bundles against a real `redis-server` (consumer groups, a worker
+crash with a backlog, replay over the real stream); it is skipped, loudly,
+when no binary is found.
 
-- **Cost vs. the Anthropic console** (spends real money, ~$0.25–$1):
-  `TOKENGRID_KEY=tgk_... pnpm --filter @tokengrid/gateway acceptance:stage1`
-  with the gateway and worker running. Use a key from a dedicated workspace.
-- **Redis consumer-group behaviour** (reclaim after a crash, trimming):
-  run `pnpm dev:ingest` against Redis 7, then `pnpm --filter @tokengrid/ingest replay` twice.
+One check needs real money and is run by hand: **cost vs. the Anthropic
+console** (~$0.25–$1). Start the gateway and worker, then
+`TOKENGRID_KEY=tgk_... pnpm --filter @tokengrid/gateway acceptance:stage1`, using a
+key from a dedicated workspace so the console figure contains nothing else.
+
+## Deploy
+
+See [DEPLOY.md](DEPLOY.md): the gateway and worker run on a persistent host (Fly.io
+configs in `deploy/`), the dashboard on Vercel or the `web` image, credentials under
+AWS KMS. `Dockerfile` builds all three images; `deploy/docker-compose.prod.yml` runs
+the whole stack on one host.
 
 ## Operating notes
 
