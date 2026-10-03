@@ -7,7 +7,7 @@ for the product constraints every change must respect.
 
 | Path | What |
 | --- | --- |
-| `apps/gateway` | Fastify streaming proxy for Anthropic `/v1/messages`; budget check before forwarding; emits usage to a Redis Stream after the response closes |
+| `apps/gateway` | Fastify streaming proxy for Anthropic and OpenAI behind one `ProviderAdapter` interface (`src/providers/`); budget check before forwarding; emits usage to a Redis Stream after the response closes |
 | `apps/ingest` | Stream consumer: prices each event by its timestamp, inserts it exactly once with its hourly rollup, maintains spend counters; `replay`, `redrive` and `budget` CLIs |
 | `apps/web` | Next.js dashboard and `/api/usage` (consent and audit rules live in `src/lib/usage.ts`) |
 | `packages/db` | Drizzle schema, migrations, seed, envelope encryption |
@@ -28,11 +28,14 @@ pnpm dev:gateway              # terminal 2
 pnpm dev:web                  # terminal 3 -> http://localhost:3000, sign in as e.g. manager@tokengrid.local
 ```
 
-Point any Anthropic client at the gateway with a virtual key:
+Point a client at the gateway with a virtual key:
 
 ```ts
-const client = new Anthropic({ apiKey: "tgk_...", baseURL: "http://localhost:8787" });
+const anthropic = new Anthropic({ apiKey: "tgk_...", baseURL: "http://localhost:8787/anthropic" }); // the bare root also works
+const openai = new OpenAI({ apiKey: "tgk_...", baseURL: "http://localhost:8787/openai/v1" });
 ```
+
+OpenAI routes need the org to have an OpenAI credential (`SEED_OPENAI_API_KEY` for the demo org).
 
 The demo org has one team (Platform): a manager, members A, B and C (only A
 allows individual drill-down) and an org admin.
@@ -42,7 +45,7 @@ allows individual drill-down) and an org admin.
 ```sh
 pnpm typecheck
 pnpm test                     # unit tests
-pnpm test:integration         # stage 1-3 acceptance on embedded Postgres 16
+pnpm test:integration         # stage 1-4 acceptance on embedded Postgres 16
 ```
 
 The integration suites use a real Postgres and the real gateway, worker and
@@ -70,6 +73,14 @@ things they cannot cover need real infrastructure:
   rates for fast mode are not published), so fast-mode events wait in the DLQ.
 - **Web search and other server-tool charges** are not priced yet; such events go to the
   DLQ rather than being stored at token cost only.
+- **OpenAI specifics.** Streaming Chat Completions only report usage when
+  `stream_options.include_usage` is true, so the gateway sets it on streaming requests.
+  This is the one place a forwarded body is modified (`OpenAIAdapter.prepareBody`); the
+  client receives one extra final chunk with empty `choices`. `prompt_tokens` includes
+  cached and cache-write tokens, and both are subtracted. Snapshot model names
+  (`gpt-6-sol-2026-08-01`) are priced as their model. Flex, priority/fast and
+  long-context (over 272K prompt tokens) calls are separate price variants with no seeded
+  rows, so they wait in the DLQ until verified prices are added.
 - **Efficiency layer.** The gateway reduces each request to hashes and sizes after the
   response is delivered (no prompt text is stored or leaves the gateway). Clients can
   send `x-tokengrid-session: <conversation id>` to scope retry matching; without it a

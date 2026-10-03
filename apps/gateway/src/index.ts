@@ -2,6 +2,8 @@ import { Redis } from "ioredis";
 import { Agent } from "undici";
 import { createDb } from "@tokengrid/db";
 import { VirtualKeyResolver } from "./auth.js";
+import { AnthropicAdapter } from "./providers/anthropic.js";
+import { OpenAIAdapter } from "./providers/openai.js";
 import { BudgetGuard } from "./budget.js";
 import { loadConfig } from "./config.js";
 import { UsageEmitter } from "./emit.js";
@@ -39,7 +41,7 @@ registerRoutes(app, {
   emitter,
   budgets: new BudgetGuard(redis, app.log),
   dispatcher,
-  anthropicUpstreamUrl: config.anthropicUpstreamUrl,
+  adapters: [new AnthropicAdapter(config.anthropicUpstreamUrl), new OpenAIAdapter(config.openaiUpstreamUrl)],
 });
 
 async function shutdown(signal: string) {

@@ -7,9 +7,10 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { count, isNull, sql as dsql } from "drizzle-orm";
 import { Agent } from "undici";
-import { createDb, schema } from "@tokengrid/db";
+import { CATALOG, createDb, schema } from "@tokengrid/db";
 import { COST_SCALE, computeCost, formatDecimal, type UsageEventV1 } from "@tokengrid/shared";
 import { BudgetGuard } from "../../../apps/gateway/src/budget.js";
+import { AnthropicAdapter } from "../../../apps/gateway/src/providers/anthropic.js";
 import { VirtualKeyResolver } from "../../../apps/gateway/src/auth.js";
 import { UsageEmitter } from "../../../apps/gateway/src/emit.js";
 import { createApp, registerRoutes } from "../../../apps/gateway/src/server.js";
@@ -33,8 +34,8 @@ try {
   // One connection, so the session-level backfill opt-in below applies to every statement.
   const { db, sql } = createDb(undefined, { max: 1 });
   await sql`select set_config('tokengrid.allow_backdated_price', 'on', false)`;
-  assert.equal(one(await db.select({ n: count() }).from(schema.modelPrices), "price count").n, 11);
-  checks.ok("migrate + seed (twice) -> 11 price rows, no duplicates");
+  assert.equal(one(await db.select({ n: count() }).from(schema.modelPrices), "price count").n, CATALOG.length);
+  checks.ok(`migrate + seed (twice) -> ${CATALOG.length} price rows, no duplicates`);
 
   const parts = await sql<{ relname: string }[]>`
     select c.relname from pg_inherits i
@@ -109,7 +110,7 @@ try {
     emitter,
     budgets: new BudgetGuard(redis, quiet),
     dispatcher: new Agent(),
-    anthropicUpstreamUrl: `http://127.0.0.1:${upstreamAddr.port}`,
+    adapters: [new AnthropicAdapter(`http://127.0.0.1:${upstreamAddr.port}`)],
   });
   const gw = await app.listen({ port: 0, host: "127.0.0.1" });
   const call = (body: object, key: string = vkey, signal?: AbortSignal) =>

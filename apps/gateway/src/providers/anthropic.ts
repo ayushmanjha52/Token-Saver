@@ -1,30 +1,10 @@
-import {
-  fingerprint,
-  mentionsFormat,
-  numbersDigest,
-  sha256Hex,
-  simhash64,
-  type NormalizedUsage,
-  type PricingTier,
-  type PromptFeatures,
-} from "@tokengrid/shared";
+import type { IncomingHttpHeaders } from "node:http";
+import { fingerprint, mentionsFormat, numbersDigest, sha256Hex, simhash64, type PromptFeatures } from "@tokengrid/shared";
 import { SseParser } from "../sse.js";
+import type { GatewayErrorKind, MeteredCall, ProviderAdapter, ProviderRoute, UsageMeter } from "./types.js";
+import { headerString, isRecord, JsonCollector, num } from "./util.js";
 
-/** What the gateway learned about one upstream call, in provider-neutral terms. */
-export interface MeteredCall {
-  model: string;
-  providerRequestId: string | null;
-  pricingTier: PricingTier;
-  usage: NormalizedUsage;
-  usageComplete: boolean;
-  stopReason: string | null;
-  /**
-   * Billable units we have no rate for (e.g. web search requests). Non-empty
-   * means the token cost alone understates the bill, so the worker refuses to
-   * price the event rather than record a silently low figure.
-   */
-  unpricedUnits: Record<string, number>;
-}
+export type { MeteredCall } from "./types.js";
 
 interface RawCounts {
   input: number | null;
@@ -33,14 +13,6 @@ interface RawCounts {
   cacheCreationTotal: number | null;
   cacheCreation5m: number | null;
   cacheCreation1h: number | null;
-}
-
-function num(v: unknown): number | null {
-  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : null;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 /**
@@ -52,7 +24,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * message, so each field is overwritten by its latest value, never summed;
  * summing would double-count any field that appears in both events.
  */
-export class AnthropicUsageAccumulator {
+export class AnthropicUsageAccumulator implements UsageMeter {
   private readonly counts: RawCounts = {
     input: null,
     output: null,
@@ -68,22 +40,15 @@ export class AnthropicUsageAccumulator {
   private sawFinalUsage = false;
   private readonly serverToolUse: Record<string, number> = {};
   private readonly sse: SseParser | null;
-  private readonly jsonChunks: Uint8Array[] = [];
-  private jsonBytes = 0;
-  /** A non-streaming Messages body is at most a few MB; anything larger is not one we can meter. */
-  private static readonly MAX_JSON_BYTES = 64 * 1024 * 1024;
+  private readonly json = new JsonCollector();
 
   constructor(readonly streamed: boolean) {
     this.sse = streamed ? new SseParser((event, data) => this.onSseEvent(event, data)) : null;
   }
 
   push(chunk: Uint8Array): void {
-    if (this.sse) {
-      this.sse.push(chunk);
-      return;
-    }
-    this.jsonBytes += chunk.byteLength;
-    if (this.jsonBytes <= AnthropicUsageAccumulator.MAX_JSON_BYTES) this.jsonChunks.push(chunk);
+    if (this.sse) this.sse.push(chunk);
+    else this.json.push(chunk);
   }
 
   end(): void {
@@ -91,14 +56,8 @@ export class AnthropicUsageAccumulator {
       this.sse.end();
       return;
     }
-    if (this.jsonBytes > AnthropicUsageAccumulator.MAX_JSON_BYTES) return;
-    let body: unknown;
-    try {
-      body = JSON.parse(Buffer.concat(this.jsonChunks).toString("utf8"));
-    } catch {
-      return;
-    }
-    if (!isRecord(body) || body.type !== "message") return;
+    const body = this.json.parse();
+    if (!body || body.type !== "message") return;
     this.applyMessage(body);
     this.stopReason = typeof body.stop_reason === "string" ? body.stop_reason : null;
     this.sawFinalUsage = isRecord(body.usage);
@@ -275,4 +234,65 @@ export function extractAnthropicPromptFeatures(body: Buffer, sessionKey: string)
     usesCacheControl: body.includes('"cache_control"'),
     sessionKey,
   };
+}
+
+/** Request headers the client may set that Anthropic acts on. Everything else is dropped. */
+const ANTHROPIC_HEADERS = ["anthropic-version", "anthropic-beta", "content-type", "accept"] as const;
+
+const ANTHROPIC_ERROR_TYPE: Record<GatewayErrorKind, string> = {
+  authentication: "authentication_error",
+  permission: "permission_error",
+  budget: "billing_error",
+  unavailable: "api_error",
+  upstream: "api_error",
+  internal: "api_error",
+};
+
+export class AnthropicAdapter implements ProviderAdapter {
+  readonly provider = "anthropic" as const;
+  readonly prefix = "/anthropic";
+  readonly mountAtRoot = true;
+  readonly routes: readonly ProviderRoute[] = [
+    { method: "POST", path: "/v1/messages", metered: true },
+    { method: "POST", path: "/v1/messages/count_tokens", metered: false },
+    { method: "GET", path: "/v1/models", metered: false },
+    { method: "GET", path: "/v1/models/:id", metered: false },
+  ];
+
+  constructor(readonly upstreamBaseUrl: string) {}
+
+  upstreamHeaders(client: IncomingHttpHeaders, upstreamKey: string): Record<string, string> {
+    const headers: Record<string, string> = {
+      "x-api-key": upstreamKey,
+      // Identity encoding keeps the forwarded bytes and the metered copy the
+      // same bytes; with compression we would decompress a second copy.
+      "accept-encoding": "identity",
+    };
+    for (const name of ANTHROPIC_HEADERS) {
+      const v = headerString(client[name]);
+      if (v !== null) headers[name] = v;
+    }
+    return headers;
+  }
+
+  /** Anthropic reports usage on every response; the body is forwarded byte for byte. */
+  prepareBody(body: Buffer): Buffer {
+    return body;
+  }
+
+  createMeter(contentType: string): UsageMeter {
+    return new AnthropicUsageAccumulator(contentType.includes("text/event-stream"));
+  }
+
+  requestId(headers: Record<string, string | string[] | undefined>): string | null {
+    return headerString(headers["request-id"]);
+  }
+
+  promptFeatures(body: Buffer, sessionKey: string): PromptFeatures | null {
+    return extractAnthropicPromptFeatures(body, sessionKey);
+  }
+
+  errorBody(kind: GatewayErrorKind, message: string): object {
+    return { type: "error", error: { type: ANTHROPIC_ERROR_TYPE[kind], message } };
+  }
 }

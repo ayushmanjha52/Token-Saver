@@ -1,5 +1,5 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { InvariantViolationError } from "@tokengrid/shared";
+import { InvariantViolationError, type Provider } from "@tokengrid/shared";
 import { createDb, type Database } from "./client.js";
 import { CATALOG } from "./catalog.js";
 import { encryptSecret } from "./crypto.js";
@@ -100,23 +100,27 @@ try {
       "team",
     );
 
-    // Rotate rather than update in place, so the partial unique index keeps
-    // exactly one live credential and the old ciphertext stays auditable.
-    await tx
-      .update(providerCredentials)
-      .set({ revokedAt: new Date() })
-      .where(
-        and(
-          eq(providerCredentials.orgId, org.id),
-          eq(providerCredentials.provider, "anthropic"),
-          isNull(providerCredentials.revokedAt),
-        ),
-      );
-    await tx.insert(providerCredentials).values({
-      orgId: org.id,
-      provider: "anthropic",
-      ciphertext: encryptSecret(upstreamKey, { orgId: org.id, provider: "anthropic" }),
-    });
+    // OpenAI is optional: without its key, OpenAI routes answer 403 for this org.
+    const credentials: [Provider, string | undefined][] = [
+      ["anthropic", upstreamKey],
+      ["openai", process.env.SEED_OPENAI_API_KEY],
+    ];
+    for (const [provider, secret] of credentials) {
+      if (!secret) continue;
+      // Rotate rather than update in place, so the partial unique index keeps
+      // exactly one live credential and the old ciphertext stays auditable.
+      await tx
+        .update(providerCredentials)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(eq(providerCredentials.orgId, org.id), eq(providerCredentials.provider, provider), isNull(providerCredentials.revokedAt)),
+        );
+      await tx.insert(providerCredentials).values({
+        orgId: org.id,
+        provider,
+        ciphertext: encryptSecret(secret, { orgId: org.id, provider }),
+      });
+    }
 
     console.log(`catalog: ${CATALOG.length} model prices`);
     console.log(`org  ${org.id}  ${org.name}`);

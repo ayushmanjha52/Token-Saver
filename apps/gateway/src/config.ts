@@ -8,6 +8,7 @@ export interface GatewayConfig {
   redisUrl: string;
   databaseUrl: string;
   anthropicUpstreamUrl: string;
+  openaiUpstreamUrl: string;
 }
 
 function required(name: string): string {
@@ -25,5 +26,6 @@ export function loadConfig(): GatewayConfig {
     redisUrl: required("REDIS_URL"),
     databaseUrl: required("DATABASE_URL"),
     anthropicUpstreamUrl: (process.env.ANTHROPIC_UPSTREAM_URL ?? "https://api.anthropic.com").replace(/\/+$/, ""),
+    openaiUpstreamUrl: (process.env.OPENAI_UPSTREAM_URL ?? "https://api.openai.com").replace(/\/+$/, ""),
   };
 }

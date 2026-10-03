@@ -15,10 +15,16 @@ export interface NormalizedUsage {
   cacheWrite1hTokens: number;
 }
 
-export const PRICING_TIERS = ["standard", "fast"] as const;
+/**
+ * Price variants for one model. "fast" is a paid speed mode (Anthropic fast
+ * mode, OpenAI priority/fast), "flex" a discounted slow lane, "long_context"
+ * the higher rate some providers charge for very large prompts. Each is
+ * priced only by its own model_prices rows, never by the standard row.
+ */
+export const PRICING_TIERS = ["standard", "fast", "flex", "long_context"] as const;
 export type PricingTier = (typeof PRICING_TIERS)[number];
 
-export const PROVIDERS = ["anthropic"] as const;
+export const PROVIDERS = ["anthropic", "openai"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 /** Wire format of one entry on the usage Redis Stream. */

@@ -53,7 +53,42 @@ function anthropic(
   };
 }
 
+/**
+ * OpenAI list prices, read from the pricing page on 2026-10-03. Only models
+ * whose every rate (input, cached input, cache write, output) was confirmed
+ * on the page are seeded; the rest go to the DLQ until someone adds verified
+ * rows, rather than being priced with a guessed cache-write rate. OpenAI has
+ * one cache-write rate, stored in both write slots; the adapter only ever
+ * fills the 5-minute slot. Long-context (>272K) rates are not seeded, so
+ * long-context calls wait in the DLQ too.
+ */
+const OPENAI_CHECKED = "2026-10-03T00:00:00Z";
+const OPENAI_SOURCE = "https://developers.openai.com/api/docs/pricing (Standard, short context), read 2026-10-03";
+
+function openai(providerModelId: string, tier: ModelTier, input: string, cachedInput: string, cacheWrite: string, output: string): CatalogPrice {
+  return {
+    provider: "openai",
+    providerModelId,
+    tier,
+    pricingTier: "standard",
+    effectiveFrom: OPENAI_CHECKED,
+    source: OPENAI_SOURCE,
+    inputPerMtok: input,
+    outputPerMtok: output,
+    cacheReadPerMtok: cachedInput,
+    cacheWrite5mPerMtok: cacheWrite,
+    cacheWrite1hPerMtok: cacheWrite,
+  };
+}
+
 export const CATALOG: readonly CatalogPrice[] = [
+  openai("gpt-6-astra", "frontier", "10.00", "1.00", "12.50", "50.00"),
+  openai("gpt-5.6-sol", "frontier", "4.00", "0.40", "5.00", "20.00"),
+  openai("gpt-6.1-sol", "balanced", "2.00", "0.10", "2.50", "10.00"),
+  openai("gpt-6-sol", "balanced", "2.00", "0.20", "2.50", "10.00"),
+  openai("gpt-5.6-terra", "balanced", "2.00", "0.20", "2.50", "12.00"),
+  openai("gpt-6-luna", "fast", "0.10", "0.01", "0.125", "0.50"),
+  openai("gpt-5.6-luna", "fast", "0.20", "0.02", "0.25", "1.20"),
   anthropic("claude-fable-5-1", "frontier", "10", "50", "0.25", "12.50", "20"),
   anthropic("claude-fable-5", "frontier", "10", "50", "1.00", "12.50", "20"),
   anthropic("claude-opus-5-5", "frontier", "4", "20", "0.20", "5", "8"),

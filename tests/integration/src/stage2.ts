@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { Agent } from "undici";
 import { createDb, schema, type Database } from "@tokengrid/db";
 import { BudgetGuard } from "../../../apps/gateway/src/budget.js";
+import { AnthropicAdapter } from "../../../apps/gateway/src/providers/anthropic.js";
 import { VirtualKeyResolver } from "../../../apps/gateway/src/auth.js";
 import { UsageEmitter } from "../../../apps/gateway/src/emit.js";
 import { createApp, registerRoutes } from "../../../apps/gateway/src/server.js";
@@ -77,7 +78,7 @@ try {
     emitter: new UsageEmitter(redis.asRedis(), quiet),
     budgets: new BudgetGuard(redis, quiet),
     dispatcher: new Agent(),
-    anthropicUpstreamUrl: `http://127.0.0.1:${addr.port}`,
+    adapters: [new AnthropicAdapter(`http://127.0.0.1:${addr.port}`)],
   });
   const gw = await app.listen({ port: 0, host: "127.0.0.1" });
   const call = async (k: string) => {

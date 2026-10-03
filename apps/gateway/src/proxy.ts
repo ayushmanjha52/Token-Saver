@@ -7,18 +7,16 @@ import type { UsageEventV1 } from "@tokengrid/shared";
 import { AuthBackendUnavailableError, type ResolvedKey, type VirtualKeyResolver } from "./auth.js";
 import { BUDGET_WARNING_HEADER, budgetExceededMessage, budgetWarningValue, type BudgetGuard } from "./budget.js";
 import type { UsageEmitter } from "./emit.js";
-import { AnthropicUsageAccumulator, extractAnthropicPromptFeatures } from "./providers/anthropic.js";
+import type { ProviderAdapter, ProviderRoute } from "./providers/types.js";
+import { headerString } from "./providers/util.js";
 
 export interface ProxyDeps {
   resolver: VirtualKeyResolver;
   emitter: UsageEmitter;
   budgets: BudgetGuard;
   dispatcher: Dispatcher;
-  anthropicUpstreamUrl: string;
+  adapters: readonly ProviderAdapter[];
 }
-
-/** Request headers the client may set that Anthropic acts on. Everything else is dropped. */
-const FORWARDED_REQUEST_HEADERS = ["anthropic-version", "anthropic-beta", "content-type", "accept"] as const;
 
 /** Connection-level headers that describe the upstream hop, not the response. */
 const HOP_BY_HOP = new Set([
@@ -32,24 +30,14 @@ const HOP_BY_HOP = new Set([
   "trailer",
 ]);
 
-function anthropicError(type: string, message: string) {
-  return { type: "error", error: { type, message } };
-}
+/** Optional client-supplied conversation id; retries are matched within one session. Never forwarded upstream. */
+const SESSION_HEADER = "x-tokengrid-session";
 
 function presentedKey(headers: IncomingHttpHeaders): string | null {
   const x = headers["x-api-key"];
   if (typeof x === "string" && x.length > 0) return x;
   const auth = headers.authorization;
   if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7);
-  return null;
-}
-
-/** Optional client-supplied conversation id; retries are matched within one session. Never forwarded upstream. */
-const SESSION_HEADER = "x-tokengrid-session";
-
-function headerString(h: string | string[] | undefined): string | null {
-  if (typeof h === "string") return h;
-  if (Array.isArray(h) && h[0] !== undefined) return h[0];
   return null;
 }
 
@@ -66,95 +54,69 @@ function drained(res: ServerResponse): Promise<void> {
   });
 }
 
-interface ForwardOptions {
-  /**
-   * Whether the call is billable. Unmetered routes (token counting, model
-   * listing) are free upstream, so they skip the budget check and emit nothing.
-   */
-  metered: boolean;
-}
-
-async function forward(deps: ProxyDeps, req: FastifyRequest, reply: FastifyReply, opts: ForwardOptions) {
+async function forward(
+  deps: ProxyDeps,
+  adapter: ProviderAdapter,
+  route: ProviderRoute,
+  upstreamPath: string,
+  req: FastifyRequest,
+  reply: FastifyReply,
+) {
   const startedAt = Date.now();
+  const fail = (status: number, kind: Parameters<ProviderAdapter["errorBody"]>[0], message: string) =>
+    reply.code(status).send(adapter.errorBody(kind, message));
+
   const key = presentedKey(req.headers);
-  if (!key) {
-    return reply.code(401).send(anthropicError("authentication_error", "Missing TokenGrid virtual key in x-api-key."));
-  }
+  if (!key) return fail(401, "authentication", "Missing TokenGrid virtual key (x-api-key or Authorization: Bearer).");
 
   let resolved: ResolvedKey | null;
   try {
     resolved = await deps.resolver.resolve(key);
   } catch (err) {
     req.log.error({ err }, "virtual key resolution failed");
-    const unavailable = err instanceof AuthBackendUnavailableError;
-    return reply
-      .code(unavailable ? 503 : 500)
-      .send(
-        anthropicError(
-          "api_error",
-          unavailable ? "TokenGrid cannot verify keys right now; retry shortly." : "TokenGrid failed to load this key's upstream credential.",
-        ),
-      );
+    return err instanceof AuthBackendUnavailableError
+      ? fail(503, "unavailable", "TokenGrid cannot verify keys right now; retry shortly.")
+      : fail(500, "internal", "TokenGrid failed to load this key's upstream credential.");
   }
-  if (!resolved) {
-    return reply.code(401).send(anthropicError("authentication_error", "Unknown or revoked TokenGrid virtual key."));
-  }
-  const upstreamKey = resolved.upstreamKeys.anthropic;
-  if (!upstreamKey) {
-    return reply
-      .code(403)
-      .send(anthropicError("permission_error", "This organization has no Anthropic credential configured in TokenGrid."));
-  }
+  if (!resolved) return fail(401, "authentication", "Unknown or revoked TokenGrid virtual key.");
+  const upstreamKey = resolved.upstreamKeys[adapter.provider];
+  if (!upstreamKey) return fail(403, "permission", `This organization has no ${adapter.provider} credential configured in TokenGrid.`);
 
   let warning: string | null = null;
-  if (opts.metered) {
+  if (route.metered) {
     const verdict = await deps.budgets.check(resolved, new Date(startedAt));
-    if (verdict.blocked) {
-      return reply.code(402).send(anthropicError("billing_error", budgetExceededMessage(verdict.blocked)));
-    }
+    if (verdict.blocked) return fail(402, "budget", budgetExceededMessage(verdict.blocked));
     if (verdict.warning) warning = budgetWarningValue(verdict.warning);
-  }
-
-  const headers: Record<string, string> = {
-    "x-api-key": upstreamKey,
-    // Identity encoding keeps the forwarded bytes and the metered copy the
-    // same bytes; with compression we would have to decompress a second
-    // copy just to read usage.
-    "accept-encoding": "identity",
-  };
-  for (const name of FORWARDED_REQUEST_HEADERS) {
-    const v = headerString(req.headers[name]);
-    if (v !== null) headers[name] = v;
   }
 
   const abort = new AbortController();
   // A client that hangs up stops caring about the rest of the generation;
-  // cancelling upstream stops Anthropic billing tokens nobody will read.
+  // cancelling upstream stops the provider billing tokens nobody will read.
   reply.raw.on("close", () => {
     if (!reply.raw.writableFinished) abort.abort();
   });
 
+  const clientBody = req.method === "GET" ? null : (req.body as Buffer);
   let upstream: Dispatcher.ResponseData;
   try {
-    // req.url keeps the query string (the SDK's beta client sends ?beta=true).
-    upstream = await upstreamRequest(`${deps.anthropicUpstreamUrl}${req.url}`, {
-      method: req.method === "GET" ? "GET" : "POST",
-      headers,
-      body: req.method === "GET" ? null : (req.body as Buffer),
+    upstream = await upstreamRequest(`${adapter.upstreamBaseUrl}${upstreamPath}`, {
+      method: route.method,
+      headers: adapter.upstreamHeaders(req.headers, upstreamKey),
+      body: clientBody === null ? null : adapter.prepareBody(clientBody, route),
       dispatcher: deps.dispatcher,
       signal: abort.signal,
     });
   } catch (err) {
     if (abort.signal.aborted) return reply.hijack();
     req.log.error({ err }, "upstream request failed");
-    return reply.code(502).send(anthropicError("api_error", "TokenGrid could not reach Anthropic."));
+    return fail(502, "upstream", `TokenGrid could not reach ${adapter.provider}.`);
   }
 
   const contentType = headerString(upstream.headers["content-type"]) ?? "";
   const contentEncoding = headerString(upstream.headers["content-encoding"]);
-  const providerRequestId = headerString(upstream.headers["request-id"]);
-  const meter = new AnthropicUsageAccumulator(contentType.includes("text/event-stream"));
-  const meterable = opts.metered && (!contentEncoding || contentEncoding === "identity");
+  const providerRequestId = adapter.requestId(upstream.headers);
+  const meter = adapter.createMeter(contentType);
+  const meterable = route.metered && (!contentEncoding || contentEncoding === "identity");
 
   reply.hijack();
   const res = reply.raw;
@@ -188,7 +150,7 @@ async function forward(deps: ProxyDeps, req: FastifyRequest, reply: FastifyReply
     if (abort.signal.aborted) upstream.body.destroy();
   }
 
-  if (!opts.metered) return;
+  if (!route.metered) return;
   if (!meterable) {
     req.log.error({ providerRequestId, contentEncoding }, "UnmeterableResponse: upstream ignored accept-encoding identity");
     return;
@@ -202,7 +164,7 @@ async function forward(deps: ProxyDeps, req: FastifyRequest, reply: FastifyReply
     }
     const event: UsageEventV1 = {
       v: 1,
-      provider: "anthropic",
+      provider: adapter.provider,
       // A random fallback, not a per-process counter: two gateways would
       // otherwise mint the same id and the second event would be dropped as
       // a duplicate.
@@ -220,12 +182,12 @@ async function forward(deps: ProxyDeps, req: FastifyRequest, reply: FastifyReply
       stopReason: call.stopReason,
       usage: call.usage,
       unpricedUnits: call.unpricedUnits,
-      // Computed after the response is delivered, so parsing a multi-megabyte
-      // body never adds latency. Without a session header, the key is the session.
-      prompt: extractAnthropicPromptFeatures(
-        req.body as Buffer,
-        `${resolved.virtualKeyId}:${(headerString(req.headers[SESSION_HEADER]) ?? "").slice(0, 128)}`,
-      ),
+      // Computed after the response is delivered, from the client's original
+      // body, so parsing a multi-megabyte request never adds latency.
+      prompt:
+        clientBody === null
+          ? null
+          : adapter.promptFeatures(clientBody, `${resolved.virtualKeyId}:${(headerString(req.headers[SESSION_HEADER]) ?? "").slice(0, 128)}`),
     };
     deps.emitter.emit(event);
   } catch (err) {
@@ -233,9 +195,22 @@ async function forward(deps: ProxyDeps, req: FastifyRequest, reply: FastifyReply
   }
 }
 
-export function registerAnthropicProxy(app: FastifyInstance, deps: ProxyDeps): void {
-  app.post("/v1/messages", (req, reply) => forward(deps, req, reply, { metered: true }));
-  app.post("/v1/messages/count_tokens", (req, reply) => forward(deps, req, reply, { metered: false }));
-  app.get("/v1/models", (req, reply) => forward(deps, req, reply, { metered: false }));
-  app.get("/v1/models/:id", (req, reply) => forward(deps, req, reply, { metered: false }));
+/**
+ * Mounts every adapter's routes under its prefix (and at the root for
+ * adapters that predate prefixes). The upstream path is the request URL with
+ * the prefix removed, query string included.
+ */
+export function registerProviderRoutes(app: FastifyInstance, deps: ProxyDeps): void {
+  for (const adapter of deps.adapters) {
+    const mounts = adapter.mountAtRoot ? [adapter.prefix, ""] : [adapter.prefix];
+    for (const mount of mounts) {
+      for (const route of adapter.routes) {
+        app.route({
+          method: route.method,
+          url: `${mount}${route.path}`,
+          handler: (req, reply) => forward(deps, adapter, route, req.url.slice(mount.length), req, reply),
+        });
+      }
+    }
+  }
 }

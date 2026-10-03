@@ -1,5 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
-import { registerAnthropicProxy, type ProxyDeps } from "./proxy.js";
+import { registerProviderRoutes, type ProxyDeps } from "./proxy.js";
 
 /** Anthropic accepts 32 MB request bodies (base64 PDFs and images); the gateway must not be the tighter limit. */
 const BODY_LIMIT = 32 * 1024 * 1024;
@@ -27,5 +27,5 @@ export function registerRoutes(app: FastifyInstance, deps: ProxyDeps): void {
     pendingEvents: deps.emitter.pendingCount,
     droppedEvents: deps.emitter.dropped,
   }));
-  registerAnthropicProxy(app, deps);
+  registerProviderRoutes(app, deps);
 }
