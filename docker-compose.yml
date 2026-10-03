@@ -1,0 +1,25 @@
+# Local infrastructure only. The gateway and workers run on the host during
+# development so they can be restarted without touching stream state.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tokengrid
+      POSTGRES_PASSWORD: tokengrid
+      POSTGRES_DB: tokengrid
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7-alpine
+    # AOF on: an unacked usage event lives only in the stream, so losing it on
+    # a Redis restart is losing billing data.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+volumes:
+  pgdata:
+  redisdata:
