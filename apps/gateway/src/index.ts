@@ -2,6 +2,7 @@ import { Redis } from "ioredis";
 import { Agent } from "undici";
 import { createDb } from "@tokengrid/db";
 import { VirtualKeyResolver } from "./auth.js";
+import { BudgetGuard } from "./budget.js";
 import { loadConfig } from "./config.js";
 import { UsageEmitter } from "./emit.js";
 import { createApp, registerRoutes } from "./server.js";
@@ -36,6 +37,7 @@ const emitter = new UsageEmitter(redis, app.log);
 registerRoutes(app, {
   resolver: new VirtualKeyResolver(redis, db, app.log),
   emitter,
+  budgets: new BudgetGuard(redis, app.log),
   dispatcher,
   anthropicUpstreamUrl: config.anthropicUpstreamUrl,
 });

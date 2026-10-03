@@ -1,7 +1,14 @@
 import { schema, type Database } from "@tokengrid/db";
-import { InvalidUsageEventError, parseUsageEvent, PriceNotFoundError, UnpricedUsageError } from "@tokengrid/shared";
-import { ingestEvent, type IngestOutcome } from "./ingest.js";
+import {
+  InvalidUsageEventError,
+  parseUsageEvent,
+  PriceNotFoundError,
+  UnpricedUsageError,
+  type UsageEventV1,
+} from "@tokengrid/shared";
+import { ingestEvent, type IngestOutcome, type IngestResult } from "./ingest.js";
 import type { PriceCache } from "./prices.js";
+import type { SpendCounters } from "./spend.js";
 
 export type EntryOutcome = IngestOutcome | "dead-lettered" | "retry";
 
@@ -69,9 +76,13 @@ export async function processEntry(
   payload: string,
   deliveries: number,
   log: { warn: (obj: object, msg: string) => void },
+  counters?: SpendCounters,
 ): Promise<EntryOutcome> {
+  let event: UsageEventV1;
+  let result: IngestResult;
   try {
-    return await ingestEvent(db, prices, parseUsageEvent(payload));
+    event = parseUsageEvent(payload);
+    result = await ingestEvent(db, prices, event);
   } catch (err) {
     if (!isPermanent(err) && deliveries < MAX_DELIVERIES) {
       log.warn({ err, entryId, deliveries }, "transient ingest failure; will redeliver");
@@ -87,4 +98,11 @@ export async function processEntry(
       return "retry";
     }
   }
+  if (counters && result.outcome === "inserted") {
+    // Best effort: the event is already durable, and a missed increment is
+    // repaired by the periodic rollup sync. Failing here must not trigger a
+    // redelivery, which would be a duplicate and could not re-add anyway.
+    await counters.add(event, result.costPico).catch((err: unknown) => log.warn({ err, entryId }, "spend counter update failed"));
+  }
+  return result.outcome;
 }

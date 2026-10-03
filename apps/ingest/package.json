@@ -9,7 +9,8 @@
     "dev": "tsx watch --env-file-if-exists=../../.env src/worker.ts",
     "start": "tsx --env-file-if-exists=../../.env src/worker.ts",
     "replay": "tsx --env-file-if-exists=../../.env src/replay.ts",
-    "redrive": "tsx --env-file-if-exists=../../.env src/redrive.ts"
+    "redrive": "tsx --env-file-if-exists=../../.env src/redrive.ts",
+    "budget": "tsx --env-file-if-exists=../../.env src/budget-cli.ts"
   },
   "dependencies": {
     "@tokengrid/db": "workspace:*",

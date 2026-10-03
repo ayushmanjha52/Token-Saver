@@ -20,7 +20,7 @@ try {
   let resolved = 0;
   for (const row of rows) {
     try {
-      await ingestEvent(db, prices, parseUsageEvent(row.payload));
+      await ingestEvent(db, prices, parseUsageEvent(row.payload)); // spend counters catch up via the worker's rollup sync
       await db.update(schema.usageDlq).set({ resolvedAt: new Date() }).where(eq(schema.usageDlq.id, row.id));
       resolved++;
     } catch (err) {

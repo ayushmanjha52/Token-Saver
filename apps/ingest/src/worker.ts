@@ -4,6 +4,7 @@ import { createDb, ensureUsagePartitions } from "@tokengrid/db";
 import { USAGE_CONSUMER_GROUP, USAGE_STREAM } from "@tokengrid/shared";
 import { PriceCache } from "./prices.js";
 import { processEntry } from "./process.js";
+import { SpendCounters } from "./spend.js";
 import { entriesFromRead, minStreamId, toEntries, type StreamEntry } from "./stream.js";
 
 /** An entry unacked this long belongs to a consumer that crashed or hit a transient failure. */
@@ -33,6 +34,7 @@ if (!redisUrl) {
 const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
 const { db, sql } = createDb(undefined, { max: 4 });
 const prices = new PriceCache(db);
+const counters = new SpendCounters(redis);
 const consumer = `${hostname()}-${process.pid}`;
 let stopping = false;
 
@@ -48,7 +50,7 @@ async function ensureGroup(): Promise<void> {
 
 async function handle(entries: StreamEntry[], deliveries: (id: string) => number): Promise<void> {
   for (const e of entries) {
-    const outcome = await processEntry(db, prices, e.id, e.payload, deliveries(e.id), log);
+    const outcome = await processEntry(db, prices, e.id, e.payload, deliveries(e.id), log, counters);
     // XACK only after the outcome is durable in Postgres; acking first would
     // lose the event if the process died before the insert committed.
     if (outcome !== "retry") await redis.xack(USAGE_STREAM, USAGE_CONSUMER_GROUP, e.id);
@@ -114,6 +116,15 @@ async function main(): Promise<void> {
 
   every(6 * 60 * 60_000, "partition maintenance", () => ensureUsagePartitions(db));
   every(10 * 60_000, "stream trim", trimAcknowledged);
+  // Budgets reach the gateway only through Redis, so this interval is the
+  // longest a budget change takes to bite. The rollup sync repairs counters
+  // left low by a crash between commit and increment.
+  const syncSpend = async () => {
+    await counters.syncBudgets(db);
+    await counters.syncFromRollups(db);
+  };
+  await syncSpend();
+  every(30_000, "budget + spend sync", syncSpend);
 
   let lastReclaim = 0;
   while (!stopping) {

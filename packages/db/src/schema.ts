@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   primaryKey,
@@ -30,9 +32,87 @@ export const users = pgTable(
     orgId: uuid("org_id").notNull().references(() => organizations.id),
     email: text("email").notNull(),
     displayName: text("display_name").notNull(),
+    /** 'member' | 'admin'. Admins see every team's aggregates; individual data still needs consent. */
+    orgRole: text("org_role").notNull().default("member"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("users_org_email_uq").on(t.orgId, t.email)],
+);
+
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    name: text("name").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("teams_org_name_uq").on(t.orgId, t.name)],
+);
+
+/** Team membership. role is 'member' | 'manager'; a manager sees the team's aggregates. */
+export const memberships = pgTable(
+  "memberships",
+  {
+    teamId: uuid("team_id").notNull().references(() => teams.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    role: text("role").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index("memberships_user_idx").on(t.userId)],
+);
+
+/**
+ * A person's permission for their managers to see their individual usage.
+ * Rows are never updated except to set revoked_at, so the history of who
+ * allowed what, when, survives for the audit trail.
+ */
+export const drilldownConsents = pgTable(
+  "drilldown_consents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    subjectUserId: uuid("subject_user_id").notNull().references(() => users.id),
+    grantedAt: timestamptz("granted_at").notNull().defaultNow(),
+    revokedAt: timestamptz("revoked_at"),
+  },
+  (t) => [
+    uniqueIndex("drilldown_consents_active_uq")
+      .on(t.subjectUserId)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);
+
+/** Every read of one person's data by someone else. Written before the data is returned. */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    actorUserId: uuid("actor_user_id").notNull().references(() => users.id),
+    subjectUserId: uuid("subject_user_id").references(() => users.id),
+    action: text("action").notNull(),
+    detail: jsonb("detail").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("audit_log_org_time_idx").on(t.orgId, t.createdAt),
+    index("audit_log_subject_idx").on(t.subjectUserId, t.createdAt),
+  ],
+);
+
+/** Monthly (UTC calendar month) spend limits. Scope is 'key' | 'user' | 'org'. */
+export const budgets = pgTable(
+  "budgets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    scope: text("scope").notNull(),
+    scopeId: uuid("scope_id").notNull(),
+    limitUsd: numeric("limit_usd", { precision: 14, scale: 2 }).notNull(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("budgets_scope_uq").on(t.scope, t.scopeId)],
 );
 
 /**
@@ -170,6 +250,35 @@ export const usageEvents = pgTable(
     uniqueIndex("usage_events_request_uq").on(t.provider, t.providerRequestId, t.occurredAt),
     index("usage_events_org_time_idx").on(t.orgId, t.occurredAt),
     index("usage_events_user_time_idx").on(t.userId, t.occurredAt),
+  ],
+);
+
+/**
+ * Hourly aggregates, maintained by the worker in the same transaction as the
+ * raw insert, so a rollup can never disagree with the events it summarises.
+ * Every dashboard aggregate reads from here; raw events are for drill-down.
+ */
+export const usageRollupHourly = pgTable(
+  "usage_rollup_hourly",
+  {
+    bucketStart: timestamptz("bucket_start").notNull(),
+    orgId: uuid("org_id").notNull().references(() => organizations.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    virtualKeyId: uuid("virtual_key_id").notNull().references(() => virtualKeys.id),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    requests: integer("requests").notNull(),
+    /** Requests whose stream ended before final usage arrived; their output counts are floors. */
+    incompleteRequests: integer("incomplete_requests").notNull(),
+    inputTokens: bigint("input_tokens", { mode: "bigint" }).notNull(),
+    outputTokens: bigint("output_tokens", { mode: "bigint" }).notNull(),
+    cacheReadTokens: bigint("cache_read_tokens", { mode: "bigint" }).notNull(),
+    cacheWriteTokens: bigint("cache_write_tokens", { mode: "bigint" }).notNull(),
+    costUsd: numeric("cost_usd", { precision: 24, scale: 12 }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.bucketStart, t.orgId, t.userId, t.virtualKeyId, t.provider, t.model] }),
+    index("usage_rollup_org_time_idx").on(t.orgId, t.bucketStart),
   ],
 );
 

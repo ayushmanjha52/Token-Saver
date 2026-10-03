@@ -1,15 +1,18 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingHttpHeaders, ServerResponse } from "node:http";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Dispatcher } from "undici";
 import { request as upstreamRequest } from "undici";
 import type { UsageEventV1 } from "@tokengrid/shared";
 import { AuthBackendUnavailableError, type ResolvedKey, type VirtualKeyResolver } from "./auth.js";
+import { BUDGET_WARNING_HEADER, budgetExceededMessage, budgetWarningValue, type BudgetGuard } from "./budget.js";
 import type { UsageEmitter } from "./emit.js";
 import { AnthropicUsageAccumulator } from "./providers/anthropic.js";
 
 export interface ProxyDeps {
   resolver: VirtualKeyResolver;
   emitter: UsageEmitter;
+  budgets: BudgetGuard;
   dispatcher: Dispatcher;
   anthropicUpstreamUrl: string;
 }
@@ -60,137 +63,170 @@ function drained(res: ServerResponse): Promise<void> {
   });
 }
 
-export function registerAnthropicProxy(app: FastifyInstance, deps: ProxyDeps): void {
-  app.post("/v1/messages", async (req: FastifyRequest, reply: FastifyReply) => {
-    const startedAt = Date.now();
-    const key = presentedKey(req.headers);
-    if (!key) {
-      return reply.code(401).send(anthropicError("authentication_error", "Missing TokenGrid virtual key in x-api-key."));
-    }
+interface ForwardOptions {
+  /**
+   * Whether the call is billable. Unmetered routes (token counting, model
+   * listing) are free upstream, so they skip the budget check and emit nothing.
+   */
+  metered: boolean;
+}
 
-    let resolved: ResolvedKey | null;
-    try {
-      resolved = await deps.resolver.resolve(key);
-    } catch (err) {
-      req.log.error({ err }, "virtual key resolution failed");
-      const unavailable = err instanceof AuthBackendUnavailableError;
-      return reply
-        .code(unavailable ? 503 : 500)
-        .send(anthropicError("api_error", unavailable ? "TokenGrid cannot verify keys right now; retry shortly." : "TokenGrid failed to load this key's upstream credential."));
-    }
-    if (!resolved) {
-      return reply.code(401).send(anthropicError("authentication_error", "Unknown or revoked TokenGrid virtual key."));
-    }
-    const upstreamKey = resolved.upstreamKeys.anthropic;
-    if (!upstreamKey) {
-      return reply
-        .code(403)
-        .send(anthropicError("permission_error", "This organization has no Anthropic credential configured in TokenGrid."));
-    }
+async function forward(deps: ProxyDeps, req: FastifyRequest, reply: FastifyReply, opts: ForwardOptions) {
+  const startedAt = Date.now();
+  const key = presentedKey(req.headers);
+  if (!key) {
+    return reply.code(401).send(anthropicError("authentication_error", "Missing TokenGrid virtual key in x-api-key."));
+  }
 
-    const headers: Record<string, string> = {
-      "x-api-key": upstreamKey,
-      // Identity encoding keeps the forwarded bytes and the metered copy the
-      // same bytes; with compression we would have to decompress a second
-      // copy just to read usage.
-      "accept-encoding": "identity",
-    };
-    for (const name of FORWARDED_REQUEST_HEADERS) {
-      const v = headerString(req.headers[name]);
-      if (v !== null) headers[name] = v;
-    }
+  let resolved: ResolvedKey | null;
+  try {
+    resolved = await deps.resolver.resolve(key);
+  } catch (err) {
+    req.log.error({ err }, "virtual key resolution failed");
+    const unavailable = err instanceof AuthBackendUnavailableError;
+    return reply
+      .code(unavailable ? 503 : 500)
+      .send(
+        anthropicError(
+          "api_error",
+          unavailable ? "TokenGrid cannot verify keys right now; retry shortly." : "TokenGrid failed to load this key's upstream credential.",
+        ),
+      );
+  }
+  if (!resolved) {
+    return reply.code(401).send(anthropicError("authentication_error", "Unknown or revoked TokenGrid virtual key."));
+  }
+  const upstreamKey = resolved.upstreamKeys.anthropic;
+  if (!upstreamKey) {
+    return reply
+      .code(403)
+      .send(anthropicError("permission_error", "This organization has no Anthropic credential configured in TokenGrid."));
+  }
 
-    const abort = new AbortController();
-    // A client that hangs up stops caring about the rest of the generation;
-    // cancelling upstream stops Anthropic billing tokens nobody will read.
-    reply.raw.on("close", () => {
-      if (!reply.raw.writableFinished) abort.abort();
+  let warning: string | null = null;
+  if (opts.metered) {
+    const verdict = await deps.budgets.check(resolved, new Date(startedAt));
+    if (verdict.blocked) {
+      return reply.code(402).send(anthropicError("billing_error", budgetExceededMessage(verdict.blocked)));
+    }
+    if (verdict.warning) warning = budgetWarningValue(verdict.warning);
+  }
+
+  const headers: Record<string, string> = {
+    "x-api-key": upstreamKey,
+    // Identity encoding keeps the forwarded bytes and the metered copy the
+    // same bytes; with compression we would have to decompress a second
+    // copy just to read usage.
+    "accept-encoding": "identity",
+  };
+  for (const name of FORWARDED_REQUEST_HEADERS) {
+    const v = headerString(req.headers[name]);
+    if (v !== null) headers[name] = v;
+  }
+
+  const abort = new AbortController();
+  // A client that hangs up stops caring about the rest of the generation;
+  // cancelling upstream stops Anthropic billing tokens nobody will read.
+  reply.raw.on("close", () => {
+    if (!reply.raw.writableFinished) abort.abort();
+  });
+
+  let upstream: Dispatcher.ResponseData;
+  try {
+    // req.url keeps the query string (the SDK's beta client sends ?beta=true).
+    upstream = await upstreamRequest(`${deps.anthropicUpstreamUrl}${req.url}`, {
+      method: req.method === "GET" ? "GET" : "POST",
+      headers,
+      body: req.method === "GET" ? null : (req.body as Buffer),
+      dispatcher: deps.dispatcher,
+      signal: abort.signal,
     });
+  } catch (err) {
+    if (abort.signal.aborted) return reply.hijack();
+    req.log.error({ err }, "upstream request failed");
+    return reply.code(502).send(anthropicError("api_error", "TokenGrid could not reach Anthropic."));
+  }
 
-    let upstream: Dispatcher.ResponseData;
-    try {
-      upstream = await upstreamRequest(`${deps.anthropicUpstreamUrl}/v1/messages`, {
-        method: "POST",
-        headers,
-        body: req.body as Buffer,
-        dispatcher: deps.dispatcher,
-        signal: abort.signal,
-      });
-    } catch (err) {
-      if (abort.signal.aborted) return reply.hijack();
-      req.log.error({ err }, "upstream request failed");
-      return reply.code(502).send(anthropicError("api_error", "TokenGrid could not reach Anthropic."));
-    }
+  const contentType = headerString(upstream.headers["content-type"]) ?? "";
+  const contentEncoding = headerString(upstream.headers["content-encoding"]);
+  const providerRequestId = headerString(upstream.headers["request-id"]);
+  const meter = new AnthropicUsageAccumulator(contentType.includes("text/event-stream"));
+  const meterable = opts.metered && (!contentEncoding || contentEncoding === "identity");
 
-    const contentType = headerString(upstream.headers["content-type"]) ?? "";
-    const contentEncoding = headerString(upstream.headers["content-encoding"]);
-    const providerRequestId = headerString(upstream.headers["request-id"]);
-    const meter = new AnthropicUsageAccumulator(contentType.includes("text/event-stream"));
-    const meterable = !contentEncoding || contentEncoding === "identity";
+  reply.hijack();
+  const res = reply.raw;
+  const outHeaders: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(upstream.headers)) {
+    if (value !== undefined && !HOP_BY_HOP.has(name)) outHeaders[name] = value;
+  }
+  if (warning) outHeaders[BUDGET_WARNING_HEADER] = warning;
+  res.writeHead(upstream.statusCode, outHeaders);
 
-    reply.hijack();
-    const res = reply.raw;
-    const outHeaders: Record<string, string | string[]> = {};
-    for (const [name, value] of Object.entries(upstream.headers)) {
-      if (value !== undefined && !HOP_BY_HOP.has(name)) outHeaders[name] = value;
-    }
-    res.writeHead(upstream.statusCode, outHeaders);
-
-    try {
-      for await (const chunk of upstream.body as AsyncIterable<Buffer>) {
-        // Delivery first. The meter sees the chunk only after it is handed to
-        // the socket, and its failures are contained so they cannot stall or
-        // corrupt the client's stream.
-        const ok = res.write(chunk);
-        if (meterable) {
-          try {
-            meter.push(chunk);
-          } catch (err) {
-            req.log.warn({ err }, "usage meter failed on chunk");
-          }
+  try {
+    for await (const chunk of upstream.body as AsyncIterable<Buffer>) {
+      // Delivery first. The meter sees the chunk only after it is handed to
+      // the socket, and its failures are contained so they cannot stall or
+      // corrupt the client's stream.
+      const ok = res.write(chunk);
+      if (meterable) {
+        try {
+          meter.push(chunk);
+        } catch (err) {
+          req.log.warn({ err }, "usage meter failed on chunk");
         }
-        if (!ok && !res.destroyed) await drained(res);
-        if (res.destroyed) break;
       }
-    } catch (err) {
-      if (!abort.signal.aborted) req.log.warn({ err }, "upstream stream ended with error");
-    } finally {
-      if (!res.destroyed) res.end();
-      if (abort.signal.aborted) upstream.body.destroy();
+      if (!ok && !res.destroyed) await drained(res);
+      if (res.destroyed) break;
     }
+  } catch (err) {
+    if (!abort.signal.aborted) req.log.warn({ err }, "upstream stream ended with error");
+  } finally {
+    if (!res.destroyed) res.end();
+    if (abort.signal.aborted) upstream.body.destroy();
+  }
 
-    if (!meterable) {
-      req.log.error({ providerRequestId, contentEncoding }, "UnmeterableResponse: upstream ignored accept-encoding identity");
+  if (!opts.metered) return;
+  if (!meterable) {
+    req.log.error({ providerRequestId, contentEncoding }, "UnmeterableResponse: upstream ignored accept-encoding identity");
+    return;
+  }
+  try {
+    meter.end();
+    const call = meter.result(providerRequestId);
+    if (!call) {
+      if (upstream.statusCode < 300) req.log.error({ providerRequestId }, "UnmeterableResponse: 2xx response carried no usage");
       return;
     }
-    try {
-      meter.end();
-      const call = meter.result(providerRequestId);
-      if (!call) {
-        if (upstream.statusCode < 300) req.log.error({ providerRequestId }, "UnmeterableResponse: 2xx response carried no usage");
-        return;
-      }
-      const event: UsageEventV1 = {
-        v: 1,
-        provider: "anthropic",
-        providerRequestId: call.providerRequestId ?? `tg_${req.id}_${startedAt}`,
-        orgId: resolved.orgId,
-        userId: resolved.userId,
-        virtualKeyId: resolved.virtualKeyId,
-        model: call.model,
-        pricingTier: call.pricingTier,
-        occurredAt: new Date(startedAt).toISOString(),
-        durationMs: Date.now() - startedAt,
-        httpStatus: upstream.statusCode,
-        streamed: meter.streamed,
-        usageComplete: call.usageComplete,
-        stopReason: call.stopReason,
-        usage: call.usage,
-        unpricedUnits: call.unpricedUnits,
-      };
-      deps.emitter.emit(event);
-    } catch (err) {
-      req.log.error({ err, providerRequestId }, "failed to build usage event");
-    }
-  });
+    const event: UsageEventV1 = {
+      v: 1,
+      provider: "anthropic",
+      // A random fallback, not a per-process counter: two gateways would
+      // otherwise mint the same id and the second event would be dropped as
+      // a duplicate.
+      providerRequestId: call.providerRequestId ?? `tg_${randomUUID()}`,
+      orgId: resolved.orgId,
+      userId: resolved.userId,
+      virtualKeyId: resolved.virtualKeyId,
+      model: call.model,
+      pricingTier: call.pricingTier,
+      occurredAt: new Date(startedAt).toISOString(),
+      durationMs: Date.now() - startedAt,
+      httpStatus: upstream.statusCode,
+      streamed: meter.streamed,
+      usageComplete: call.usageComplete,
+      stopReason: call.stopReason,
+      usage: call.usage,
+      unpricedUnits: call.unpricedUnits,
+    };
+    deps.emitter.emit(event);
+  } catch (err) {
+    req.log.error({ err, providerRequestId }, "failed to build usage event");
+  }
+}
+
+export function registerAnthropicProxy(app: FastifyInstance, deps: ProxyDeps): void {
+  app.post("/v1/messages", (req, reply) => forward(deps, req, reply, { metered: true }));
+  app.post("/v1/messages/count_tokens", (req, reply) => forward(deps, req, reply, { metered: false }));
+  app.get("/v1/models", (req, reply) => forward(deps, req, reply, { metered: false }));
+  app.get("/v1/models/:id", (req, reply) => forward(deps, req, reply, { metered: false }));
 }

@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": ">=20.11"
+    "node": ">=20.12"
   },
   "scripts": {
     "typecheck": "pnpm -r --parallel run typecheck",
@@ -12,7 +12,9 @@
     "db:migrate": "pnpm --filter @tokengrid/db run migrate",
     "db:seed": "pnpm --filter @tokengrid/db run seed",
     "dev:gateway": "pnpm --filter @tokengrid/gateway run dev",
-    "dev:ingest": "pnpm --filter @tokengrid/ingest run dev"
+    "dev:ingest": "pnpm --filter @tokengrid/ingest run dev",
+    "test:integration": "pnpm --filter @tokengrid/integration test:integration",
+    "dev:web": "pnpm --filter @tokengrid/web run dev"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",

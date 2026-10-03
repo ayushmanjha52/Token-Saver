@@ -15,6 +15,20 @@
       "when": 1791020882443,
       "tag": "0001_usage_partitions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791036593184,
+      "tag": "0002_tenancy_budgets_rollups",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791036594443,
+      "tag": "0003_guards",
+      "breakpoints": true
     }
   ]
 }
