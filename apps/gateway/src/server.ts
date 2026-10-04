@@ -22,6 +22,17 @@ export function createApp(opts: { logger?: boolean } = {}): FastifyInstance {
 }
 
 export function registerRoutes(app: FastifyInstance, deps: ProxyDeps): void {
+  // The gateway is an API, but the first thing anyone does with its URL is
+  // open it in a browser; answer with what it is instead of a bare 404.
+  app.get("/", async () => ({
+    service: "tokengrid-gateway",
+    ok: true,
+    usage: "Point an SDK at this host with a TokenGrid virtual key (tgk_...) as the API key.",
+    endpoints: deps.adapters.flatMap((a) =>
+      a.routes.map((r) => `${r.method} ${a.prefix}${r.path}${a.mountAtRoot ? ` (also ${r.path})` : ""}`),
+    ),
+    health: "/healthz",
+  }));
   app.get("/healthz", async () => ({
     ok: true,
     pendingEvents: deps.emitter.pendingCount,
