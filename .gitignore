@@ -8,3 +8,4 @@ dist/
 .next/
 *.tsbuildinfo
 deploy/prod.env
+.vercel

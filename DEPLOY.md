@@ -81,6 +81,27 @@ curl https://tokengrid-gateway.fly.dev/anthropic/v1/messages -H "x-api-key: tgk_
   -d '{"model":"claude-haiku-4-5","max_tokens":32,"messages":[{"role":"user","content":"ping"}]}'
 ```
 
+## Free staging (Render + Neon + Vercel, no payment method)
+
+A staging deployment on free tiers. It is **not production**: it runs with the
+local encryption key (`NODE_ENV=staging`) because no major cloud offers KMS
+without a card, and the free Render instance sleeps after 15 idle minutes (the
+first call afterwards waits about a minute).
+
+- **Neon** (Postgres): migrations and admin CLIs use the direct URL; the dashboard
+  uses the pooled URL with `DATABASE_PREPARE=false`.
+- **Render** (one free web service): `deploy/render/Dockerfile` runs the gateway,
+  the worker and a private in-memory Redis 7 in one container, supervised by
+  `deploy/render/start.mjs`. Render allows one free Key Value per workspace and no
+  free background workers. Env: `NODE_ENV=staging`, `DATABASE_URL` (direct),
+  `TOKENGRID_LOCAL_KEK`.
+- **Vercel** (Hobby): project root `apps/web`; env `DATABASE_URL` (pooled),
+  `DATABASE_PREPARE=false`, `TOKENGRID_SESSION_SECRET`. Deployed with
+  `vercel deploy --prod` from the repo root (`.vercelignore` trims the upload).
+- **Bootstrap** from any machine with the repo, using the same `TOKENGRID_LOCAL_KEK`
+  and `TOKENGRID_SESSION_SECRET` as the services and `NODE_ENV=staging`:
+  `node packages/db/dist/migrate.js`, then the admin CLI commands in step 6 above.
+
 ## Single host (Docker Compose)
 
 ```sh
