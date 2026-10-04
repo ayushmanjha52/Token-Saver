@@ -69,20 +69,6 @@ export interface UsageEventV1 {
   prompt: PromptFeatures | null;
 }
 
-export function emptyUsage(): NormalizedUsage {
-  return {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWrite5mTokens: 0,
-    cacheWrite1hTokens: 0,
-  };
-}
-
-export function totalTokens(u: NormalizedUsage): number {
-  return u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWrite5mTokens + u.cacheWrite1hTokens;
-}
-
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 /**
  * What the gateway keeps about a prompt: hashes and sizes, never text.
  *
- * Prompt storage is off by default (CLAUDE.md, constraint 4), so retry
+ * Prompt text is never stored by default (people are being measured), so retry
  * detection and lint have to work from these. A fingerprint of a short
  * prompt can still be confirmed by someone who guesses the prompt, which is
  * why these rows are pruned on the same schedule as other usage detail.

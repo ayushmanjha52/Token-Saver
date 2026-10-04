@@ -45,7 +45,6 @@ const NEGATIVE_TTL_MS = 30_000;
 const REDIS_TTL_S = 300;
 const MEMORY_MAX = 10_000;
 
-export const redisKeyFor = virtualKeyCacheKey;
 
 export class VirtualKeyResolver {
   private readonly memory = new Map<string, MemoryEntry>();
@@ -72,7 +71,7 @@ export class VirtualKeyResolver {
   private async lookup(hash: string): Promise<CachedRecord | null> {
     let redisDown = false;
     try {
-      const cached = await this.redis.get(redisKeyFor(hash));
+      const cached = await this.redis.get(virtualKeyCacheKey(hash));
       if (cached === "null") return null;
       if (cached) return JSON.parse(cached) as CachedRecord;
     } catch (err) {
@@ -88,7 +87,7 @@ export class VirtualKeyResolver {
     }
     if (!redisDown) {
       this.redis
-        .set(redisKeyFor(hash), JSON.stringify(record), "EX", record ? REDIS_TTL_S : NEGATIVE_TTL_MS / 1000)
+        .set(virtualKeyCacheKey(hash), JSON.stringify(record), "EX", record ? REDIS_TTL_S : NEGATIVE_TTL_MS / 1000)
         .catch((err: unknown) => this.log.warn({ err }, "failed to populate key cache"));
     }
     return record;

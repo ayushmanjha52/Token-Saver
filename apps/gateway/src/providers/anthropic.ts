@@ -4,7 +4,6 @@ import { SseParser } from "../sse.js";
 import type { GatewayErrorKind, MeteredCall, ProviderAdapter, ProviderRoute, UsageMeter } from "./types.js";
 import { headerString, isRecord, JsonCollector, num } from "./util.js";
 
-export type { MeteredCall } from "./types.js";
 
 interface RawCounts {
   input: number | null;

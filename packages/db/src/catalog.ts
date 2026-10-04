@@ -27,7 +27,7 @@ export interface CatalogPrice extends PriceRates {
  * fast requests. A fast-mode event goes to the DLQ until verified rows exist.
  */
 const CHECKED = "2026-09-25T00:00:00Z";
-const SOURCE = "Anthropic pricing via claude-api reference (cached 2026-09-25); verify at https://docs.anthropic.com/en/docs/about-claude/pricing";
+const SOURCE = "https://www.anthropic.com/pricing, checked 2026-09-25";
 
 function anthropic(
   providerModelId: string,

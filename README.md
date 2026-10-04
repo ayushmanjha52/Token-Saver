@@ -1,7 +1,23 @@
 # TokenGrid
 
-Metering gateway and coaching dashboard for AI token spend. See `CLAUDE.md`
-for the product constraints every change must respect.
+Metering gateway and coaching dashboard for AI token spend. TokenGrid sits in
+the request path, meters every call exactly, attributes it to a person, and
+shows that person (and, with their consent, their manager) how much of the
+spend was wasted and what to change.
+
+## Principles
+
+1. **The gateway is the source of truth.** Consumer subscriptions (Claude Pro,
+   ChatGPT Plus) expose no usage API; provider admin APIs are used only to
+   reconcile against.
+2. **Metering never blocks delivery.** The response is written to the client
+   first; usage is read from a copy and recorded afterwards. If Redis or
+   Postgres is down, the user still gets their answer.
+3. **No score without measured inputs.** Efficiency is built from retries,
+   model fit, cache use and acceptance, and is never shown without its parts.
+4. **People come first.** Everyone sees their own data; managers see team
+   totals with unnamed lines; opening one person needs that person's consent
+   and is logged where they can see it. Prompt text is not stored.
 
 ## Layout
 
