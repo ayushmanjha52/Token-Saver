@@ -41,10 +41,34 @@ export const users = pgTable(
     displayName: text("display_name").notNull(),
     /** 'member' | 'admin'. Admins see every team's aggregates; individual data still needs consent. */
     orgRole: text("org_role").notNull().default("member"),
+    /** scrypt hash; null for people who only ever sign in with one-time links. */
+    passwordHash: text("password_hash"),
+    /** Consecutive failed password sign-ins; reset on success. */
+    failedLogins: integer("failed_logins").notNull().default(0),
+    /** Password sign-in is refused until this time after too many failures. */
+    lockedUntil: timestamptz("locked_until"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("users_org_email_uq").on(t.orgId, t.email)],
+  (t) => [
+    uniqueIndex("users_org_email_uq").on(t.orgId, t.email),
+    // Password sign-in looks people up by email alone, so an email can hold a
+    // password in at most one org.
+    uniqueIndex("users_password_email_uq")
+      .on(sql`lower(${t.email})`)
+      .where(sql`${t.passwordHash} is not null`),
+  ],
 );
+
+/**
+ * Fixed-window counters for sign-up and sign-in attempts, keyed by a hash of
+ * the client address. Kept in Postgres because the dashboard runs as
+ * serverless functions that share no memory between requests.
+ */
+export const authThrottle = pgTable("auth_throttle", {
+  key: text("key").primaryKey(),
+  windowStart: timestamptz("window_start").notNull(),
+  attempts: integer("attempts").notNull(),
+});
 
 export const teams = pgTable(
   "teams",

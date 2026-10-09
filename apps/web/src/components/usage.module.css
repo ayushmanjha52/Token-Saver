@@ -385,3 +385,96 @@ table.table {
   cursor: not-allowed;
   color: var(--muted);
 }
+
+/* ---------- sign in / sign up ---------- */
+
+.authPage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 48px 16px;
+}
+
+.authCard {
+  width: 100%;
+  max-width: 420px;
+}
+
+.authTagline {
+  margin: 8px 0 28px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.authTitle {
+  font-size: 32px;
+  margin: 0 0 4px;
+}
+
+.form {
+  display: grid;
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field input {
+  width: 100%;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.primary {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  font-weight: 600;
+}
+
+.primary:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+.alert {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(232, 70, 111, 0.4);
+  border-radius: var(--radius);
+  background: rgba(232, 70, 111, 0.08);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.authFoot {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.authFoot a {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.authFoot a:hover {
+  border-color: var(--ink);
+}
+
+.authNote {
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}

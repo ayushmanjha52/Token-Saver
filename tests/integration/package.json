@@ -7,11 +7,12 @@
     "typecheck": "tsc -p tsconfig.json",
     "stage1": "tsx src/stage1.ts",
     "stage2": "pnpm --filter @tokengrid/web build && tsx src/stage2.ts",
-    "test:integration": "pnpm run stage1 && pnpm run stage2 && pnpm run stage3 && pnpm run stage4 && pnpm run stage5 && pnpm run stage6",
+    "test:integration": "pnpm run stage1 && pnpm run stage2 && pnpm run auth && pnpm run stage3 && pnpm run stage4 && pnpm run stage5 && pnpm run stage6",
     "stage3": "tsx src/stage3.ts",
     "stage4": "tsx src/stage4.ts",
     "stage5": "tsx src/stage5.ts",
-    "stage6": "tsx src/stage6.ts"
+    "stage6": "tsx src/stage6.ts",
+    "auth": "tsx src/auth.ts"
   },
   "devDependencies": {
     "@tokengrid/db": "workspace:*",

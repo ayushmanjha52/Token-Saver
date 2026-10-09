@@ -178,15 +178,22 @@ interface Viewer {
   orgId: string;
   displayName: string;
   orgRole: "member" | "admin";
+  hasPassword: boolean;
 }
 
 async function loadViewer(db: Database, session: Session): Promise<Viewer> {
   const [u] = await db
-    .select({ id: schema.users.id, orgId: schema.users.orgId, displayName: schema.users.displayName, orgRole: schema.users.orgRole })
+    .select({
+      id: schema.users.id,
+      orgId: schema.users.orgId,
+      displayName: schema.users.displayName,
+      orgRole: schema.users.orgRole,
+      passwordHash: schema.users.passwordHash,
+    })
     .from(schema.users)
     .where(and(eq(schema.users.id, session.userId), eq(schema.users.orgId, session.orgId)));
   if (!u) throw new UsageAccessError(401, "unknown_user", "Session user no longer exists.");
-  return { ...u, orgRole: u.orgRole === "admin" ? "admin" : "member" };
+  return { id: u.id, orgId: u.orgId, displayName: u.displayName, orgRole: u.orgRole === "admin" ? "admin" : "member", hasPassword: u.passwordHash !== null };
 }
 
 async function viewerTeams(db: Database, v: Viewer): Promise<TeamRef[]> {
@@ -301,6 +308,7 @@ export async function getUsage(
       displayName: v.displayName,
       orgRole: v.orgRole,
       consented,
+      hasPassword: v.hasPassword,
       teams,
       recentViews: recent.map((x) => ({ at: x.at.toISOString(), actor: x.actor })),
     },

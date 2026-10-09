@@ -140,5 +140,9 @@ node apps/ingest/dist/admin-cli.js login-link --email ops@acme.com --base-url ht
   consumer group safely; reconciliation and retention are idempotent across them.
 - **Rotating the KMS key or moving off the local key.** Re-store each credential with
   `credential-cli.js`; it rotates the row and encrypts under the current key.
-- **Sign-in** is by one-time links until an identity provider is wired into
-  `apps/web/src/lib/session.ts`.
+- **Sign-in.** Anyone can create an account at `/signup` (a new organization with
+  them as admin) and sign in with email and password. Passwords are scrypt-hashed;
+  10 failures lock an account for 15 minutes; sign-ups are limited to 5 per address
+  per hour and sign-in attempts to 20 per 15 minutes. People added by an admin get a
+  one-time link (`admin-cli.js login-link`) and can set a password from their
+  dashboard. An identity provider can replace all of this in `apps/web/src/lib/session.ts`.

@@ -2,7 +2,8 @@ import { eq } from "drizzle-orm";
 import { NextResponse, type NextRequest } from "next/server";
 import { schema } from "@tokengrid/db";
 import { db } from "@/lib/db";
-import { DevLoginDisabledError, SESSION_COOKIE, SESSION_TTL_S, sessionSecret, signSession } from "@/lib/session-token";
+import { setSessionCookie } from "@/lib/session-cookie";
+import { DevLoginDisabledError, SESSION_COOKIE } from "@/lib/session-token";
 
 export const runtime = "nodejs";
 
@@ -23,15 +24,7 @@ export async function POST(req: NextRequest) {
     .from(schema.users)
     .where(eq(schema.users.email, email));
   if (!user) return NextResponse.redirect(new URL("/login?error=unknown", req.url), 303);
-  const res = NextResponse.redirect(new URL("/usage", req.url), 303);
-  res.cookies.set(SESSION_COOKIE, signSession({ userId: user.id, orgId: user.orgId }, sessionSecret()), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: req.nextUrl.protocol === "https:",
-    path: "/",
-    maxAge: SESSION_TTL_S,
-  });
-  return res;
+  return setSessionCookie(NextResponse.redirect(new URL("/usage", req.url), 303), { userId: user.id, orgId: user.orgId }, req);
 }
 
 export async function DELETE(req: NextRequest) {

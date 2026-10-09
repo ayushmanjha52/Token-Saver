@@ -110,6 +110,8 @@ export interface UsageResponse {
     displayName: string;
     orgRole: "member" | "admin";
     consented: boolean;
+    /** False for link-only accounts, which can set a first password without a current one. */
+    hasPassword: boolean;
     teams: TeamRef[];
     /** Who has opened this person's individual usage recently. Members always see this. */
     recentViews: { at: string; actor: string }[];

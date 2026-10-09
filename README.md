@@ -1,6 +1,6 @@
 # TokenGrid
 
-**Live:** [Dashboard](https://tokengrid.vercel.app) ·
+**Live:** [Dashboard](https://tokengrid.vercel.app) ([create an account](https://tokengrid.vercel.app/signup)) ·
 [Gateway API](https://tokengrid-gateway.onrender.com) ·
 [Source](https://github.com/ayushmanjha52/Token-Saver)
 

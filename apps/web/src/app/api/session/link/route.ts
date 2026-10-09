@@ -3,7 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { schema } from "@tokengrid/db";
 import { verifyLoginLink } from "@tokengrid/shared";
 import { db } from "@/lib/db";
-import { SESSION_COOKIE, SESSION_TTL_S, sessionSecret, signSession } from "@/lib/session-token";
+import { setSessionCookie } from "@/lib/session-cookie";
+import { sessionSecret } from "@/lib/session-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +25,5 @@ export async function GET(req: NextRequest) {
     .where(and(eq(t.nonce, claims.nonce), eq(t.userId, claims.userId), isNull(t.usedAt), gt(t.expiresAt, new Date())))
     .returning({ userId: t.userId });
   if (!claimed) return fail;
-  const res = NextResponse.redirect(new URL("/usage", req.url), 303);
-  res.cookies.set(SESSION_COOKIE, signSession({ userId: claims.userId, orgId: claims.orgId }, sessionSecret()), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: req.nextUrl.protocol === "https:",
-    path: "/",
-    maxAge: SESSION_TTL_S,
-  });
-  return res;
+  return setSessionCookie(NextResponse.redirect(new URL("/usage", req.url), 303), { userId: claims.userId, orgId: claims.orgId }, req);
 }

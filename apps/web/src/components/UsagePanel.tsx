@@ -389,6 +389,7 @@ export function UsagePanel() {
                     </tbody>
                   </table>
                 )}
+                <PasswordForm hasPassword={data.viewer.hasPassword} onSaved={() => void load(view, period)} />
                 <MyData onDeleted={() => void load(view, period)} />
               </div>
             </section>
@@ -489,5 +490,56 @@ function TeamLines({
         ) : null}
       </div>
     </section>
+  );
+}
+
+/** First password for link-only accounts, or a change that proves the current one. */
+function PasswordForm({ hasPassword, onSaved }: { hasPassword: boolean; onSaved: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    const res = await fetch("/api/auth/password", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ current: hasPassword ? current : undefined, next }),
+    });
+    const body = (await res.json().catch(() => null)) as { error?: { message: string } } | null;
+    setSaving(false);
+    if (res.ok) {
+      setMessage({ ok: true, text: hasPassword ? "Password changed." : "Password set. You can now sign in with your email and password." });
+      setCurrent("");
+      setNext("");
+      onSaved();
+    } else {
+      setMessage({ ok: false, text: body?.error?.message ?? "The password could not be saved." });
+    }
+  }
+
+  return (
+    <>
+      <h3 className="label" style={{ margin: "20px 0 6px" }}>
+        {hasPassword ? "Change password" : "Set a password"}
+      </h3>
+      {hasPassword ? null : (
+        <p className={s.note} style={{ marginTop: 0 }}>
+          You signed in with a one-time link. Set a password to sign in with your email next time.
+        </p>
+      )}
+      <form onSubmit={(e) => void save(e)} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 8 }}>
+        {hasPassword ? (
+          <input type="password" placeholder="Current password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
+        ) : null}
+        <input type="password" placeholder="New password (10+ characters)" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" minLength={10} required />
+        <button type="submit" disabled={saving}>
+          {hasPassword ? "Change password" : "Set password"}
+        </button>
+      </form>
+      {message ? <p className={`${s.note} ${message.ok ? "" : s.over}`}>{message.text}</p> : null}
+    </>
   );
 }
