@@ -6,7 +6,10 @@ import "./globals.css";
 // deploys do not depend on reaching Google Fonts, and no reader's browser
 // is sent to a third party to render the page.
 const display = localFont({
-  src: [{ path: "../fonts/archivo-800.woff2", weight: "800" }],
+  src: [
+    { path: "../fonts/instrument-serif-400.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/instrument-serif-400-italic.woff2", weight: "400", style: "italic" },
+  ],
   variable: "--font-display",
   display: "swap",
 });
@@ -21,9 +24,9 @@ const mono = localFont({
 });
 const sans = localFont({
   src: [
-    { path: "../fonts/plex-sans-400.woff2", weight: "400" },
-    { path: "../fonts/plex-sans-500.woff2", weight: "500" },
-    { path: "../fonts/plex-sans-600.woff2", weight: "600" },
+    { path: "../fonts/hanken-grotesk-400.woff2", weight: "400" },
+    { path: "../fonts/hanken-grotesk-500.woff2", weight: "500" },
+    { path: "../fonts/hanken-grotesk-600.woff2", weight: "600" },
   ],
   variable: "--font-sans",
   display: "swap",

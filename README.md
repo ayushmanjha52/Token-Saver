@@ -1,5 +1,12 @@
 # TokenGrid
 
+**Live:** [Dashboard](https://tokengrid.vercel.app) ·
+[Gateway API](https://tokengrid-gateway.onrender.com) ·
+[Source](https://github.com/ayushmanjha52/Token-Saver)
+
+> The live instance runs on free tiers (Render, Neon, Vercel). The gateway
+> sleeps after 15 idle minutes, so the first request can take about a minute.
+
 Metering gateway and coaching dashboard for AI token spend. TokenGrid sits in
 the request path, meters every call exactly, attributes it to a person, and
 shows that person (and, with their consent, their manager) how much of the

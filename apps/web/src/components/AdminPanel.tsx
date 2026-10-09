@@ -115,7 +115,9 @@ export function AdminPanel() {
     <main className={s.page}>
       <header className={s.header}>
         <div>
-          <div className={`display ${s.wordmark}`}>TokenGrid</div>
+          <div className={`display ${s.wordmark}`}>
+            Token<em>Grid</em>
+          </div>
           <div className="label">Reconciliation · metered cost against provider bills</div>
         </div>
         <a className={s.linkButton} href="/usage">

@@ -115,7 +115,9 @@ export function UsagePanel() {
     <main className={s.page}>
       <header className={s.header}>
         <div>
-          <div className={`display ${s.wordmark}`}>TokenGrid</div>
+          <div className={`display ${s.wordmark}`}>
+            Token<em>Grid</em>
+          </div>
           <div className="label">Load panel · metered at the gateway</div>
         </div>
         {data ? (

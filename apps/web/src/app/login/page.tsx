@@ -6,7 +6,9 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
   const production = process.env.NODE_ENV === "production";
   return (
     <main className={s.page} style={{ maxWidth: 480 }}>
-      <div className={`display ${s.wordmark}`}>TokenGrid</div>
+      <div className={`display ${s.wordmark}`}>
+        Token<em>Grid</em>
+      </div>
       <section className="panel" style={{ marginTop: 24 }}>
         <div className={s.panelHead}>
           <h1 className="label" style={{ margin: 0 }}>

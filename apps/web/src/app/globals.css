@@ -1,19 +1,31 @@
 :root {
-  --ink: #16202b;
-  --paper: #e7eaec;
-  --panel: #fafbfb;
-  --rule: #c2cad1;
-  --muted: #6b7885;
-  --verdigris: #2f7a6b;
-  --ochre: #c08a1e;
-  --oxblood: #9e3b34;
+  color-scheme: dark;
 
-  --radius: 2px;
-  --shadow: 0 8px 24px -18px rgba(22, 32, 43, 0.45);
+  /* Surfaces, darkest to lightest. */
+  --paper: #0a0a0b;
+  --track: #0d0d0f;
+  --panel: #111113;
+  --raised: #18181b;
+
+  /* Lines and text. Warm off-white reads softer on black than pure white. */
+  --rule: #232327;
+  --rule-strong: #34343a;
+  --ink: #edeae3;
+  --muted: #8c8a84;
+  --faint: #5e5d59;
+
+  /* Data colours, checked for lightness, chroma and colour-blind separation on --panel. */
+  --verdigris: #21a375; /* kept spend */
+  --ochre: #c2861f; /* wasted spend, always hatched */
+  --oxblood: #e8466f; /* over budget, hard stops */
+
+  --radius: 6px;
+  --radius-lg: 10px;
+  --shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 24px 48px -32px rgba(0, 0, 0, 0.9);
   --meter-h: 26px;
   --gap: 2px;
 
-  /* Waste is crossed out, not colored in: hatching reads as struck-through. */
+  /* Waste is crossed out, not coloured in: hatching reads as struck-through. */
   --hatch: repeating-linear-gradient(45deg, var(--ochre) 0 1.5px, transparent 1.5px 5px);
 }
 
@@ -24,12 +36,26 @@
 html,
 body {
   margin: 0;
-  background: var(--paper);
+  min-height: 100%;
   color: var(--ink);
   font-family: var(--font-sans), system-ui, sans-serif;
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  /* One faint wash of the productive colour from the top, so the black has depth without decoration. */
+  background:
+    radial-gradient(1100px 520px at 12% -12%, rgba(33, 163, 117, 0.07), transparent 62%),
+    var(--paper);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(33, 163, 117, 0.35);
+  color: var(--ink);
 }
 
 /* Every figure and label is mono with tabular figures, so columns of numbers align and do not jitter on refetch. */
@@ -46,17 +72,22 @@ select {
 
 .label {
   font-size: 11px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
+/* Display type: an editorial serif for the wordmark and the big numbers. */
 .display {
-  font-family: var(--font-display), var(--font-sans), sans-serif;
-  font-weight: 800;
-  letter-spacing: -0.05em;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 0.95;
+}
+
+.display em {
+  font-style: italic;
+  color: var(--muted);
 }
 
 a {
@@ -67,22 +98,24 @@ button {
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  background: var(--panel);
+  background: transparent;
   color: var(--ink);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
-  padding: 6px 10px;
+  padding: 7px 12px;
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 button:hover {
-  border-color: var(--ink);
+  border-color: var(--muted);
+  background: var(--raised);
 }
 
 button[aria-pressed="true"] {
   background: var(--ink);
   border-color: var(--ink);
-  color: var(--panel);
+  color: var(--paper);
 }
 
 button:focus-visible,
@@ -97,17 +130,21 @@ select:focus-visible {
 input,
 select {
   font-size: 14px;
-  padding: 8px 10px;
-  border: 1px solid var(--rule);
+  padding: 9px 12px;
+  border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--track);
   color: var(--ink);
+}
+
+input::placeholder {
+  color: var(--faint);
 }
 
 .panel {
   background: var(--panel);
   border: 1px solid var(--rule);
-  border-radius: 3px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
 }
 

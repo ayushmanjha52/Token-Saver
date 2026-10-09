@@ -1,7 +1,7 @@
 .page {
-  max-width: 1120px;
+  max-width: 1160px;
   margin: 0 auto;
-  padding: 24px 24px 64px;
+  padding: 40px 32px 96px;
 }
 
 .header {
@@ -9,13 +9,13 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 16px;
-  padding-bottom: 16px;
+  padding-bottom: 20px;
   border-bottom: 1px solid var(--rule);
 }
 
 .wordmark {
-  font-size: 28px;
-  text-transform: uppercase;
+  font-size: 44px;
+  margin-bottom: 6px;
 }
 
 .who {
@@ -29,8 +29,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 24px;
-  padding: 16px 0;
+  gap: 10px 24px;
+  padding: 22px 0 20px;
 }
 
 .group {
@@ -46,7 +46,7 @@
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: 18px;
   transition: opacity 0.15s;
 }
 
@@ -59,23 +59,23 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--rule);
 }
 
 .panelBody {
-  padding: 16px;
+  padding: 20px;
 }
 
 .hero {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 20px;
 }
 
 .heroValue {
-  font-size: 56px;
+  font-size: 88px;
 }
 
 .heroUnit {
@@ -99,7 +99,7 @@
 
 /* Cells draw their own right/bottom rules, so a short last row leaves panel, not a grey block. */
 .stat {
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-right: 1px solid var(--rule);
   border-bottom: 1px solid var(--rule);
 }
@@ -107,8 +107,9 @@
 .statValue {
   font-family: var(--font-mono), monospace;
   font-variant-numeric: tabular-nums;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 500;
+  margin-top: 2px;
 }
 
 .legend {
@@ -176,10 +177,10 @@
 }
 
 .banner {
-  padding: 10px 14px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius);
-  background: var(--panel);
+  padding: 12px 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-lg);
+  background: var(--raised);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -210,7 +211,7 @@
   display: flex;
   align-items: flex-end;
   gap: var(--gap);
-  border-bottom: 1px solid var(--ink);
+  border-bottom: 1px solid var(--rule-strong);
 }
 
 .gridline {
@@ -241,8 +242,8 @@
 
 .bar {
   width: 100%;
-  background: var(--muted);
-  border-radius: 1px 1px 0 0;
+  background: var(--faint);
+  border-radius: 2px 2px 0 0;
   transform-origin: bottom;
 }
 
@@ -253,8 +254,8 @@
   transform: translateX(-50%);
   white-space: nowrap;
   padding: 6px 8px;
-  background: var(--panel);
-  border: 1px solid var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
   font-family: var(--font-mono), monospace;
   font-variant-numeric: tabular-nums;
@@ -294,6 +295,7 @@ table.table {
 
 .table th {
   font-weight: 500;
+  color: var(--muted);
 }
 
 .table .num {
@@ -303,10 +305,10 @@ table.table {
 .code {
   font-family: var(--font-mono), monospace;
   font-size: 12px;
-  background: var(--paper);
+  background: var(--track);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 12px 14px;
   overflow-x: auto;
   white-space: pre;
 }
@@ -316,7 +318,10 @@ table.table {
     padding: 16px 16px 48px;
   }
   .heroValue {
-    font-size: 40px;
+    font-size: 60px;
+  }
+  .wordmark {
+    font-size: 36px;
   }
   .range {
     margin-left: 0;
@@ -359,14 +364,16 @@ table.table {
   text-transform: uppercase;
   text-decoration: none;
   color: var(--ink);
-  background: var(--panel);
-  border: 1px solid var(--rule);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
-  padding: 6px 10px;
+  padding: 7px 12px;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .linkButton:hover {
-  border-color: var(--ink);
+  border-color: var(--muted);
+  background: var(--raised);
 }
 
 .danger:not(:disabled) {

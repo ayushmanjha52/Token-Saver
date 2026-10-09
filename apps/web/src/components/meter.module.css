@@ -8,7 +8,7 @@
   height: var(--meter-h);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--track);
   overflow: hidden;
 }
 
@@ -51,7 +51,7 @@
   bottom: 0;
   width: 1px;
   height: 6px;
-  background: var(--rule);
+  background: var(--rule-strong);
 }
 
 .tick.major {
@@ -73,8 +73,8 @@
   top: calc(100% + 8px);
   min-width: 240px;
   padding: 10px 12px;
-  background: var(--panel);
-  border: 1px solid var(--ink);
+  background: var(--raised);
+  border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   font-family: var(--font-mono), monospace;
